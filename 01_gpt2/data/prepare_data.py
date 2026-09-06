@@ -585,7 +585,7 @@ def get_bin_path(jsonl_path: str) -> str:
         str: Path to the corresponding `.bin` tokenized file.
     """
     root, _ = os.path.splitext(jsonl_path)
-    return root + ".bin"
+    return root + f"_{TOKENIZER_NAME}_tokenizer" + ".bin"
 
 
 def _iter_jsonl_text_chunks(jsonl_path: str, chunk_chars: int):
