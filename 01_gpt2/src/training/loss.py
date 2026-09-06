@@ -44,8 +44,8 @@ def calc_batch_cost(inp_batch, target_batch, model, device):
     Returns:
         torch.Tensor: A scalar tensor containing the average cross-entropy loss for the batch.
     """
-    inp_batch = inp_batch.to(device)
-    target_batch = target_batch.to(device)
+    inp_batch = inp_batch.to(device, non_blocking=True)
+    target_batch = target_batch.to(device, non_blocking=True)
     logits = model(inp_batch)
     loss = torch.nn.functional.cross_entropy(
         logits.flatten(0, 1), target_batch.flatten()

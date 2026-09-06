@@ -6,10 +6,9 @@ import tiktoken
 
 from scripts.evaluate import generate_text, text_to_token_ids, token_ids_to_text
 from configs.model_configs import GPT_configs
-from src.data.dataset import create_dataloader
+from src.data.pretrain_dataset.dataset import create_dataloader, prepare_bin_dataset
 from src.training.loss import calc_loader_cost, calc_batch_cost, calc_perplexity
 from src.models.gpt_model import GPT_model
-from src.data.dataset import load_text_data
 from src.utils.ckeckpoints import load_checkpoint, save_checkpoint
 
 
@@ -290,15 +289,27 @@ def learning_rate_change(
 if __name__ == "__main__":
     cfg = GPT_configs()
 
-    text = load_text_data(cfg)
+    bin_path = prepare_bin_dataset(cfg)
     train_ratio = 0.80
-    split_idx = int(train_ratio * len(text))
-    train_data = text[:split_idx]
-    val_data = text[split_idx:]
 
     tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)
-    train_loader = create_dataloader(train_data)
-    val_loader = create_dataloader(val_data)
+    train_loader = create_dataloader(
+        bin_path,
+        start_frac=0.0,
+        end_frac=train_ratio,
+        batch_size=cfg.batch_size,
+        max_length=cfg.context_length,
+        stride=cfg.context_length,
+    )
+    val_loader = create_dataloader(
+        bin_path,
+        start_frac=train_ratio,
+        end_frac=1.0,
+        shuffle=False,
+        batch_size=cfg.batch_size,
+        max_length=cfg.context_length,
+        stride=cfg.context_length,
+    )
     epochs = 60
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
