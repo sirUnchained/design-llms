@@ -2,13 +2,38 @@ import asyncio
 import aiohttp
 import hashlib
 import json
+import sys
 import time
 import os
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 from typing import List, Optional, Dict, Tuple
-from tqdm import tqdm
+
+# Force line-buffered (flushed on every newline) stdout. When output isn't
+# attached to a live terminal -- redirected to a file, piped through another
+# tool, run inside some wrapper/runner -- Python silently switches stdout to
+# block buffering, so print() lines sit in memory and only appear once the
+# buffer fills or the process exits. That's what made progress look
+# "missing" (it was actually just delayed and dumped all at once at the
+# end). Reconfiguring here guarantees every print() is flushed immediately,
+# in any environment.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except AttributeError:
+    pass  # very old Python without reconfigure(); flush=True calls below still work
+
+# If True, every fetch attempt logs its own line (✅/🚫/⛔/etc). With large
+# URL lists (thousands+) this floods the console/log and buries the actual
+# progress signal, so it's off by default -- turn it on for debugging a
+# small batch. Progress is always shown separately regardless of this flag.
+VERBOSE_PER_URL_LOGS = False
+
+# How often to print a plain-text progress line (every N completed URLs).
+# This does NOT rely on carriage-return redraws (unlike a tqdm bar), so it
+# shows up reliably in redirected output, log files, or any non-interactive
+# runner -- not just a live terminal.
+PROGRESS_LOG_EVERY = 50
 
 # -------------------------------------------------------------------
 # Configuration
@@ -277,6 +302,14 @@ def append_jsonl(filepath: str, record: dict):
 # -------------------------------------------------------------------
 # Asynchronous scraper
 # -------------------------------------------------------------------
+def vlog(msg: str):
+    """Per-URL detail logging -- gated behind VERBOSE_PER_URL_LOGS so it
+    doesn't bury the progress line on large URL lists. Set the flag to True
+    to see every ✅/🚫/⛔/etc. outcome as it happens."""
+    if VERBOSE_PER_URL_LOGS:
+        print(msg)
+
+
 async def scrape_one(
     session: aiohttp.ClientSession,
     url: str,
@@ -294,7 +327,7 @@ async def scrape_one(
 
     rp, delay = await robots_cache.get(domain, session)
     if not rp.can_fetch(USER_AGENT, url):
-        print(f"⛔ {url} – disallowed by robots.txt")
+        vlog(f"⛔ {url} – disallowed by robots.txt")
         return False
 
     domain_lock = await domain_throttle.get_lock(domain)
@@ -312,12 +345,12 @@ async def scrape_one(
                             if retry_after
                             else RETRY_BACKOFF**attempt
                         )
-                        print(f"⏳ {url} – 429 rate limited, waiting {wait}s")
+                        vlog(f"⏳ {url} – 429 rate limited, waiting {wait}s")
                         await asyncio.sleep(wait)
                         continue
 
                     if resp.status != 200:
-                        print(
+                        vlog(
                             f"⚠️ {url} – HTTP {resp.status} (attempt {attempt}/{MAX_RETRIES})"
                         )
                         if attempt < MAX_RETRIES:
@@ -329,16 +362,14 @@ async def scrape_one(
                         "text/html" not in content_type
                         and "application/xhtml" not in content_type
                     ):
-                        print(
+                        vlog(
                             f"🚫 {url} – non-HTML content-type: {content_type or 'unknown'}"
                         )
                         return False
 
                     content_length = resp.headers.get("Content-Length")
                     if content_length and int(content_length) > MAX_CONTENT_BYTES:
-                        print(
-                            f"🚫 {url} – too large ({content_length} bytes), skipping"
-                        )
+                        vlog(f"🚫 {url} – too large ({content_length} bytes), skipping")
                         return False
 
                     html = await resp.text()
@@ -348,25 +379,25 @@ async def scrape_one(
                     soup = BeautifulSoup(html, "html.parser")
 
                     if has_ai_opt_out(soup, resp.headers):
-                        print(f"🚫 {url} – AI/indexing opt-out signal present")
+                        vlog(f"🚫 {url} – AI/indexing opt-out signal present")
                         return False
 
                     lic, verified = detect_license(soup, url)
                     if FILTER_BY_LICENSE and not is_license_allowed(lic, verified):
-                        print(
+                        vlog(
                             f"🚫 {url} – license not allowed: {lic} (verified={verified})"
                         )
                         return False
 
                     text = extract_main_text(soup)
                     if not text:
-                        print(f"📭 {url} – no text extracted")
+                        vlog(f"📭 {url} – no text extracted")
                         return False
 
                     h = content_hash(text)
                     async with hashes_lock:
                         if h in seen_hashes:
-                            print(f"♻️ {url} – duplicate content, skipping")
+                            vlog(f"♻️ {url} – duplicate content, skipping")
                             return False
                         seen_hashes.add(h)
 
@@ -386,20 +417,20 @@ async def scrape_one(
                     async with write_lock:
                         append_jsonl(output_file, record)
 
-                    print(
+                    vlog(
                         f"✅ {url} – {len(text)} chars, license: {lic} (verified={verified})"
                     )
                     return True
 
             except asyncio.TimeoutError:
-                print(f"⌛ {url} – timeout ({attempt}/{MAX_RETRIES})")
+                vlog(f"⌛ {url} – timeout ({attempt}/{MAX_RETRIES})")
             except Exception as e:
-                print(f"❌ {url} – {type(e).__name__}: {e}")
+                vlog(f"❌ {url} – {type(e).__name__}: {e}")
 
             if attempt < MAX_RETRIES:
                 await asyncio.sleep(RETRY_BACKOFF**attempt)
 
-        print(f"💀 {url} – failed after {MAX_RETRIES} attempts")
+        vlog(f"💀 {url} – failed after {MAX_RETRIES} attempts")
         return False
 
 
@@ -452,7 +483,8 @@ async def scrape_urls(urls: List[str], output_file: str):
     print(
         f"📋 {len(unique)} unique URLs ({skipped} already in '{output_file}', "
         f"{len(to_fetch)} to fetch; max concurrency={MAX_CONCURRENT}, "
-        f"per-domain requests serialized to respect crawl-delay)"
+        f"per-domain requests serialized to respect crawl-delay)",
+        flush=True,
     )
 
     if not to_fetch:
@@ -470,6 +502,10 @@ async def scrape_urls(urls: List[str], output_file: str):
 
     connector = aiohttp.TCPConnector(limit=MAX_CONCURRENT * 2)
     count = 0
+    completed = 0
+    total = len(to_fetch)
+    start_time = time.monotonic()
+
     async with aiohttp.ClientSession(connector=connector) as session:
         tasks = [
             scrape_one(
@@ -483,14 +519,28 @@ async def scrape_urls(urls: List[str], output_file: str):
             )
             for url in to_fetch
         ]
-        # as_completed (not gather) so the bar advances as each URL finishes,
-        # regardless of which order they land in.
-        with tqdm(total=len(tasks), desc="Scraping", unit="url") as progress:
-            for coro in asyncio.as_completed(tasks):
-                ok = await coro
-                if ok:
-                    count += 1
-                progress.update(1)
+        # as_completed (not gather) so progress reflects URLs as they finish,
+        # regardless of which order they land in. We print a plain text line
+        # every PROGRESS_LOG_EVERY completions (not a carriage-return bar),
+        # so it shows up reliably in redirected output, logs, or any
+        # non-interactive runner -- not just a live terminal.
+        for coro in asyncio.as_completed(tasks):
+            ok = await coro
+            completed += 1
+            if ok:
+                count += 1
+
+            if completed % PROGRESS_LOG_EVERY == 0 or completed == total:
+                elapsed = time.monotonic() - start_time
+                rate = completed / elapsed if elapsed > 0 else 0
+                eta_sec = (total - completed) / rate if rate > 0 else 0
+                pct = completed / total * 100
+                print(
+                    f"📊 Progress: {completed}/{total} ({pct:.1f}%) – "
+                    f"{count} saved – {rate:.1f} url/s – "
+                    f"ETA {eta_sec / 60:.1f} min",
+                    flush=True,
+                )
 
     print(
         f"\n🎉 Done. {count} new documents appended to '{output_file}' (JSONL, one record per line)."
