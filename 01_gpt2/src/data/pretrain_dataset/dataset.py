@@ -34,8 +34,7 @@ class MemmapGPTDataset(Dataset):
 
     Args:
         bin_path (str):
-            Path to the binary file of `uint16` token ids, as produced by
-            `tokenize_to_bin`.
+            Path to the binary file of `uint16` token ids.
         context_length (int):
             Maximum sequence length (number of tokens per sample).
         stride (int):
@@ -139,37 +138,40 @@ def get_bin_path(data_path: str, tokenizer_name: str) -> str:
     return root + f"_{tokenizer_name}_tokenizer" + ".bin"
 
 
-def prepare_bin_dataset(cfg: GPT_configs, force: bool = False) -> str:
+def ensure_bin_dataset(cfg: GPT_configs) -> str:
     """
-    ## Ensure a tokenized binary exists for the configured dataset, building it if needed.
+    ## Verify a tokenized binary exists for the configured dataset.
 
-    Checks for a `.bin` file next to `cfg.data_path` (see `get_bin_path`). If
-    it's missing (or `force=True`), tokenizes the raw corpus once via
-    `tokenize_to_bin`. On every subsequent run, the existing `.bin` is reused
-    and tokenization is skipped entirely.
+    Tokenization is no longer something training does for you -- it now
+    lives entirely in `data/prepare_data.py`, run once as a separate,
+    offline data-prep step (scrape -> filter -> tokenize) before you ever
+    start `main.py -t`. This function just checks that the expected `.bin`
+    file (see `get_bin_path`) is present, and raises immediately with clear
+    next steps if it isn't, rather than silently tokenizing mid-training run.
 
     ---
 
     Args:
-        cfg (GPT_configs): Your GPT config class. Uses `cfg.data_path` as the
-                           source corpus and `cfg.ticktoken_tokenizer` as the
-                           tokenizer name.
-        force (bool, optional): If `True`, re-tokenize even if a `.bin` file
-                                already exists. Default is `False`.
+        cfg (GPT_configs): Your GPT config class. Uses `cfg.data_path` to
+                           derive the expected `.bin` path.
 
     Returns:
         str: Path to the ready-to-use tokenized `.bin` file.
+
+    Raises:
+        FileNotFoundError: If no `.bin` file exists at the derived path.
     """
     bin_path = get_bin_path(cfg.data_path, cfg.ticktoken_tokenizer)
 
-    if force or not os.path.exists(bin_path):
-        print(
-            f"No tokenized binary found at {bin_path}, tokenizing {cfg.data_path} ..."
+    if not os.path.exists(bin_path):
+        raise FileNotFoundError(
+            f"No tokenized binary found at '{bin_path}'.\n"
+            f"Tokenization now happens as a separate offline step, not during training.\n"
+            f"Run:  python data/prepare_data.py <urls.txt> {cfg.data_path}\n"
+            f"(this scrapes/filters your data AND writes '{bin_path}')."
         )
-        tokenize_to_bin(cfg.data_path, bin_path, tokenizer_name=cfg.ticktoken_tokenizer)
-    else:
-        print(f"Found existing tokenized binary at {bin_path}, skipping tokenization.")
 
+    print(f"Using tokenized binary at {bin_path}")
     return bin_path
 
 

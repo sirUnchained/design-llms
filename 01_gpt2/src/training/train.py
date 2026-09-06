@@ -6,7 +6,7 @@ import tiktoken
 
 from scripts.evaluate import generate_text, text_to_token_ids, token_ids_to_text
 from configs.model_configs import GPT_configs
-from src.data.pretrain_dataset.dataset import create_dataloader, prepare_bin_dataset
+from src.data.pretrain_dataset.dataset import create_dataloader, ensure_bin_dataset
 from src.training.loss import calc_loader_cost, calc_batch_cost, calc_perplexity
 from src.models.gpt_model import GPT_model
 from src.utils.ckeckpoints import load_checkpoint, save_checkpoint
@@ -289,7 +289,7 @@ def learning_rate_change(
 if __name__ == "__main__":
     cfg = GPT_configs()
 
-    bin_path = prepare_bin_dataset(cfg)
+    bin_path = ensure_bin_dataset(cfg)
     train_ratio = 0.80
 
     tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)

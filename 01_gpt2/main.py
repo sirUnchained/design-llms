@@ -8,7 +8,7 @@ from scripts.evaluate import (
     token_ids_to_text,
 )
 from configs.model_configs import get_gpt_configs, GPT_configs
-from src.data.pretrain_dataset.dataset import create_dataloader, prepare_bin_dataset
+from src.data.pretrain_dataset.dataset import create_dataloader, ensure_bin_dataset
 from src.training.train import train_model
 from src.models.gpt_model import GPT_model
 from src.utils.save_model_hf import save_model_hf, ensure_huggingface_login
@@ -135,7 +135,7 @@ def generate(model, cfg: GPT_configs, prompt: str, seed=None):
 
 def train(model: GPT_model, cfg: GPT_configs):
     # ==== TOKENIZE ONCE (CACHED) AND BUILD TRAIN/VAL LOADERS FROM ONE BIN FILE ====
-    bin_path = prepare_bin_dataset(cfg)
+    bin_path = ensure_bin_dataset(cfg)
     train_ratio = 0.80
 
     tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)

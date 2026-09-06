@@ -49,6 +49,17 @@ MAX_CONTENT_BYTES = 5_000_000  # skip/truncate anything larger than ~5MB of HTML
 DEFAULT_CRAWL_DELAY = 1.0  # seconds, used when robots.txt gives no crawl-delay
 COUNT_TOKENS = False
 
+# -------------------------------------------------------------------
+# Tokenization (post-scrape)
+# -------------------------------------------------------------------
+# After scraping finishes, the resulting JSONL is tokenized straight to a
+# uint16 binary file next to it -- this is now the ONLY place tokenization
+# happens. Training (main.py / src/training/train.py) never tokenizes; it
+# just expects this .bin to already exist and fails fast with instructions
+# if it doesn't. Run this script once whenever your dataset changes.
+TOKENIZE_TO_BIN = True
+TOKENIZE_CHUNK_CHARS = 50_000_000  # ~50MB of text per chunk while tokenizing
+
 # License allowlist (URLs and keywords).
 #
 # Deliberately restricted to CC0 / Public Domain and CC-BY. These are the only
@@ -553,11 +564,144 @@ def read_urls_from_file(filepath: str) -> List[str]:
         return [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
 
+# -------------------------------------------------------------------
+# Tokenization: JSONL -> uint16 binary, single streaming pass
+# -------------------------------------------------------------------
+def get_bin_path(jsonl_path: str) -> str:
+    """
+    ## Derive the tokenized binary path for a given JSONL dataset path.
+
+    Keeps the tokenized cache next to the dataset file, same name, `.bin`
+    extension. So `./data/llm_dataset.jsonl` maps to `./data/llm_dataset.bin`.
+    This must match `get_bin_path` in `src/data/dataset.py` exactly, since
+    that's where training looks for the file this function produces.
+
+    ---
+
+    Args:
+        jsonl_path (str): Path to the scraped `.jsonl` dataset file.
+
+    Returns:
+        str: Path to the corresponding `.bin` tokenized file.
+    """
+    root, _ = os.path.splitext(jsonl_path)
+    return root + ".bin"
+
+
+def _iter_jsonl_text_chunks(jsonl_path: str, chunk_chars: int):
+    """
+    ## Yield bounded-size text chunks from a scraped JSONL dataset.
+
+    Reads the JSONL file line by line, extracting the `"text"` field of
+    each record and accumulating it into a buffer, yielding once the buffer
+    reaches `chunk_chars`. Only one chunk's worth of text is held in memory
+    at a time, so this scales to arbitrarily large JSONL files.
+
+    ---
+
+    Args:
+        jsonl_path (str): Path to the scraped `.jsonl` dataset file.
+        chunk_chars (int): Number of characters to accumulate per yielded chunk.
+
+    Yields:
+        str: Successive chunks of concatenated record text, each up to
+            ~`chunk_chars` long.
+    """
+    buf = ""
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            buf += record["text"] + "\n"
+            if len(buf) >= chunk_chars:
+                yield buf
+                buf = ""
+    if buf:
+        yield buf
+
+
+def tokenize_to_bin(
+    jsonl_path: str,
+    out_path: str,
+    tokenizer_name: str = TOKENIZER_NAME,
+    chunk_chars: int = TOKENIZE_CHUNK_CHARS,
+) -> int:
+    """
+    ## Tokenize a scraped JSONL dataset into a binary token file, in a single pass.
+
+    Reads the dataset in bounded-size text chunks (see
+    `_iter_jsonl_text_chunks`), encodes each chunk with tiktoken, and appends
+    the resulting `uint16` token ids straight onto the end of `out_path` as
+    raw bytes. A plain file handle in append-binary mode grows on disk as we
+    write, so there's no need to know the total token count up front and no
+    need for a second counting pass -- peak RAM stays bounded by
+    `chunk_chars` regardless of dataset size, and the corpus is tokenized
+    exactly once.
+
+    The resulting file has the same on-disk layout a `numpy.memmap` of dtype
+    `uint16` would produce, so training reads it back with
+    `np.memmap(out_path, dtype=np.uint16, mode="r")` -- see
+    `MemmapGPTDataset` / `ensure_bin_dataset` in `src/data/dataset.py`.
+
+    `uint16` is safe for the GPT-2 tokenizer since `vocab_size` (50257) fits
+    under 65536, and it halves storage compared to `int64`.
+
+    This is meant to be run once, as part of this data-prep script, never
+    during training.
+
+    ---
+
+    Args:
+        jsonl_path (str):
+            Path to the scraped `.jsonl` dataset (as produced by `scrape_urls`).
+        out_path (str):
+            Path where the resulting binary token file will be written.
+        tokenizer_name (str, optional):
+            Name of the tiktoken encoding to use. Default is `TOKENIZER_NAME`.
+        chunk_chars (int, optional):
+            Number of characters to accumulate before encoding and writing a
+            chunk. Default is `TOKENIZE_CHUNK_CHARS`.
+
+    Returns:
+        int: Total number of tokens written to `out_path`. `0` if
+            `jsonl_path` doesn't exist or contains no records.
+    """
+    if not os.path.exists(jsonl_path):
+        print(f"⚠️ {jsonl_path} not found, skipping tokenization.")
+        return 0
+
+    import tiktoken
+    import numpy as np
+
+    enc = tiktoken.get_encoding(tokenizer_name)
+    total_len = 0
+
+    print(f"🔤 Tokenizing '{jsonl_path}' -> '{out_path}' ...", flush=True)
+
+    with open(out_path, "wb") as out_f:
+        for chunk in _iter_jsonl_text_chunks(jsonl_path, chunk_chars):
+            ids = enc.encode_ordinary(chunk)
+            arr = np.array(ids, dtype=np.uint16)
+            out_f.write(arr.tobytes())
+            total_len += arr.size
+
+    if total_len:
+        print(f"✅ Wrote {total_len:,} tokens to '{out_path}'")
+    else:
+        print(
+            f"⚠️ '{jsonl_path}' produced 0 tokens (empty file?), '{out_path}' is empty."
+        )
+
+    return total_len
+
+
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) not in (2, 3):
-        print(f"Usage: python scraper.py urls.txt [output.jsonl]")
+        print(f"Usage: python prepare_data.py urls.txt [output.jsonl]")
         sys.exit(1)
 
     url_file = sys.argv[1]
@@ -574,26 +718,6 @@ if __name__ == "__main__":
 
     asyncio.run(scrape_urls(urls, output_file))
 
-    if COUNT_TOKENS:
-        # Tokenize the entire dataset (only if file exists and has content)
-        try:
-            import tiktoken
-
-            total_tokens = 0
-            tokenizer = tiktoken.get_encoding(TOKENIZER_NAME)
-            with open(output_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    record = json.loads(line)
-                    total_tokens += len(tokenizer.encode(record["text"]))
-
-            if total_tokens:
-                print(
-                    f"Your dataset has {total_tokens} tokens (using {TOKENIZER_NAME} tokenizer)."
-                )
-            else:
-                print("The output file is empty. No tokens to count.")
-        except FileNotFoundError:
-            print(f"File '{output_file}' not found. No data scraped successfully.")
+    if TOKENIZE_TO_BIN:
+        bin_path = get_bin_path(output_file)
+        tokenize_to_bin(output_file, bin_path)
