@@ -1,18 +1,65 @@
+# src/data/tokenize.py
 import json
 
 import numpy as np
 import tiktoken
 
 
+def _iter_text_chunks(src_path, chunk_chars):
+    """
+    ## Yield bounded-size text chunks from a corpus file.
+
+    Used by `tokenize_to_bin` so only one chunk of raw text is held in
+    memory at a time, regardless of total corpus size.
+
+    ---
+
+    Args:
+        src_path (str): Path to a `.txt` or `.jsonl` corpus file.
+        chunk_chars (int): Number of characters to accumulate per yielded chunk.
+
+    Yields:
+        str: Successive chunks of raw text, each up to ~`chunk_chars` long.
+    """
+    is_jsonl = src_path.endswith(".jsonl")
+    buf = ""
+
+    with open(src_path, "r", encoding="utf-8") as f:
+        if is_jsonl:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                buf += json.loads(line)["text"] + "\n"
+                if len(buf) >= chunk_chars:
+                    yield buf
+                    buf = ""
+        else:
+            while True:
+                piece = f.read(chunk_chars)
+                if not piece:
+                    break
+                buf += piece
+                yield buf
+                buf = ""
+    if buf:
+        yield buf
+
+
 def tokenize_to_bin(src_path, out_path, tokenizer_name="gpt2", chunk_chars=50_000_000):
     """
-    ## Tokenize a large text/JSONL corpus into a binary token file.
+    ## Tokenize a large text/JSONL corpus into a binary token file, in a single pass.
 
-    Instead of loading the entire corpus into memory as a Python string and
-    encoding it in one shot (which explodes RAM on multi-GB datasets), this
-    function reads the source file in bounded-size character chunks, encodes
-    each chunk independently with tiktoken, and appends the resulting token
-    ids into a single `uint16` binary file on disk via `numpy.memmap`.
+    Reads the corpus in bounded-size chunks, encodes each chunk with
+    tiktoken, and appends the resulting `uint16` token ids straight onto the
+    end of `out_path` as raw bytes. There's no need to know the total token
+    count up front: a plain file handle in append-binary mode grows on disk
+    as we write, so peak RAM stays bounded by `chunk_chars` regardless of
+    corpus size, and the corpus is only tokenized once.
+
+    The resulting file has the same on-disk layout a `numpy.memmap` of
+    dtype `uint16` would produce, so it can still be opened for reading with
+    `np.memmap(out_path, dtype=np.uint16, mode="r")` (see `MemmapGPTDataset`).
 
     `uint16` is safe for the GPT-2 tokenizer since `vocab_size` (50257) fits
     under 65536, and it halves storage compared to `int64`.
@@ -32,69 +79,23 @@ def tokenize_to_bin(src_path, out_path, tokenizer_name="gpt2", chunk_chars=50_00
         tokenizer_name (str, optional):
             Name of the tiktoken encoding to use. Default is `"gpt2"`.
         chunk_chars (int, optional):
-            Number of characters to accumulate before encoding and flushing
-            a chunk. Controls the memory/throughput tradeoff during
-            preprocessing. Default is 50,000,000 (~50MB of text per chunk).
+            Number of characters to accumulate before encoding and writing a
+            chunk. Controls the memory/throughput tradeoff: larger chunks
+            mean fewer tiktoken calls (faster) but more RAM held per chunk.
+            Default is 50,000,000 (~50MB of text per chunk).
 
     Returns:
         int: Total number of tokens written to `out_path`.
     """
     enc = tiktoken.get_encoding(tokenizer_name)
-    is_jsonl = src_path.endswith(".jsonl")
+    total_len = 0
 
-    arrs = []
-    buf = ""
+    with open(out_path, "wb") as out_f:
+        for chunk in _iter_text_chunks(src_path, chunk_chars):
+            ids = enc.encode_ordinary(chunk)
+            arr = np.array(ids, dtype=np.uint16)
+            out_f.write(arr.tobytes())
+            total_len += arr.size
 
-    def flush(buf):
-        """
-        ## Encode a text buffer into a uint16 numpy array of token ids.
-
-        Small helper used by `tokenize_to_bin` to convert an accumulated
-        chunk of raw text into token ids without special-token handling,
-        since a raw training corpus shouldn't contain control tokens.
-
-        ---
-
-        Args:
-            buf (str): Accumulated text chunk to encode.
-
-        Returns:
-            np.ndarray: Array of token ids with dtype `uint16`. Empty array
-                        if `buf` is empty.
-        """
-        if not buf:
-            return np.empty(0, dtype=np.uint16)
-        ids = enc.encode_ordinary(buf)
-        return np.array(ids, dtype=np.uint16)
-
-    with open(src_path, "r", encoding="utf-8") as f:
-        if is_jsonl:
-            for line in f:
-                line = line.strip()
-                if not line:  # Skip empty lines
-                    continue
-                buf += json.loads(line)["text"] + "\n"
-                if len(buf) >= chunk_chars:
-                    arrs.append(flush(buf))
-                    buf = ""
-        else:
-            while True:
-                piece = f.read(chunk_chars)
-                if not piece:
-                    break
-                buf += piece
-                arrs.append(flush(buf))
-                buf = ""
-        if buf:
-            arrs.append(flush(buf))
-
-    total_len = sum(a.size for a in arrs)
-    mm = np.memmap(out_path, dtype=np.uint16, mode="w+", shape=(total_len,))
-    offset = 0
-    for a in arrs:
-        mm[offset : offset + a.size] = a
-        offset += a.size
-    mm.flush()
     print(f"Wrote {total_len:,} tokens to {out_path}")
-
     return total_len
