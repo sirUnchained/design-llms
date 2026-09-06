@@ -9,7 +9,7 @@ A from-scratch PyTorch implementation of a GPT-2 style decoder-only transformer,
 - Custom `GPT_model` built from token/positional embeddings, stacked transformer blocks, layer norm, and an output head
 - Multi-head causal self-attention implemented manually (no `nn.MultiheadAttention`)
 - Configurable via `.env` (model size, training hyperparameters, tokenizer, paths)
-- Streaming JSONL / plain-text dataset loading with a sliding-window `Dataset`
+- Memory-mapped dataset pipeline: JSONL/text corpora are tokenized once to a `uint16` binary file, then streamed via `numpy.memmap`, so RAM usage stays flat regardless of dataset size (multi-GB+ corpora included)
 - Training loop with periodic evaluation, perplexity tracking, and loss plotting
 - Resumable checkpoints, mirrored automatically to a Hugging Face Hub repo
 - Greedy and temperature/top-k sampling for text generation
@@ -67,6 +67,20 @@ flowchart LR
     PROJ --> OUT["Context vectors"]
 ```
 
+### Data Pipeline
+
+```mermaid
+flowchart TD
+    A["Raw corpus (.txt / .jsonl)"] --> B{".bin already exists?"}
+    B -- no --> C["tokenize_to_bin: stream-encode in chunks"]
+    C --> D["Write uint16 tokens to .bin via memmap"]
+    B -- yes --> E["Reuse existing .bin"]
+    D --> F["MemmapGPTDataset: lazy random-access reads"]
+    E --> F
+    F --> G["DataLoader (num_workers, pin_memory)"]
+    G --> H["Train / Val split by token-position range"]
+```
+
 ## Project Structure
 
 ```
@@ -78,7 +92,10 @@ flowchart LR
 │   └── evaluate.py             # Tokenization helpers + text generation
 ├── src/
 │   ├── data/
-│   │   └── dataset.py          # Dataset, DataLoader, text/JSONL loading
+│   │   │
+│   │   pretrain_dataset/
+│   │       ├── tokenize.py         # One-time corpus -> uint16 .bin tokenization
+│   │       └── dataset.py          # Memmap Dataset, DataLoader, .bin caching
 │   ├── models/
 │   │   ├── gpt_model.py        # Top-level GPT_model
 │   │   ├── transformer_block.py
@@ -129,6 +146,10 @@ CHECKPOINTS_PATH=check-points/
 
 > Data can be a plain `.txt` file or a `.jsonl` file where each line has a `"text"` field.
 
+### Dataset tokenization (automatic, cached)
+
+On the first training run, the corpus at `DATA_PATH` is tokenized once and written to a `uint16` binary file next to it (e.g. `./data/llm_dataset.jsonl` $\to$ `./data/llm_dataset.bin`). Every subsequent run reuses that `.bin` file directly via `numpy.memmap` instead of re-tokenizing, and only the token windows actually being read are paged into memory — so a 7GB+ corpus trains with roughly the same RAM footprint as a tiny one. Delete the `.bin` file (or pass `force=True` to `prepare_bin_dataset`) if you change the source data and need to re-tokenize.
+
 If `REPO_ID` is a valid Hugging Face repo id, the app will prompt for login (or read `HF_TOKEN`) and automatically push weights, config, and checkpoints to the Hub.
 
 ## Usage
@@ -163,7 +184,7 @@ Run with no flags for a `q` (quit) / `t` (train) / `g` (generate) / `i` (info) m
 
 ```mermaid
 flowchart TD
-    S["Load & split text (80/20)"] --> DL["Build train/val DataLoaders"]
+    S["Ensure tokenized .bin exists (tokenize once, cached)"] --> DL["Build train/val DataLoaders (memmap, split by token position)"]
     DL --> CK{"Resume checkpoint?"}
     CK -- yes --> LOAD["Load latest.pt"]
     CK -- no --> INIT["Start fresh"]

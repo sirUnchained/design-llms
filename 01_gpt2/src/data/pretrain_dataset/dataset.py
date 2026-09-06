@@ -118,12 +118,13 @@ class MemmapGPTDataset(Dataset):
         return x, y
 
 
-def get_bin_path(data_path: str, tokenizer: str) -> str:
+def get_bin_path(data_path: str, tokenizer_name: str) -> str:
     """
     ## Derive the tokenized binary path for a given raw data path.
 
     Keeps the tokenized cache next to the source corpus, same name, `.bin`
-    extension. So `./data/llm_dataset.jsonl` maps to `./data/llm_dataset.bin`.
+    extension. So `./data/llm_dataset.jsonl` maps to
+    `./data/llm_dataset_{tokenizer_name}_tokenizer.bin`.
 
     ---
 
@@ -133,8 +134,9 @@ def get_bin_path(data_path: str, tokenizer: str) -> str:
     Returns:
         str: Path to the corresponding `.bin` tokenized file.
     """
+
     root, _ = os.path.splitext(data_path)
-    return root + f"_{tokenizer}_tokenizer" + ".bin"
+    return root + f"_{tokenizer_name}_tokenizer" + ".bin"
 
 
 def prepare_bin_dataset(cfg: GPT_configs, force: bool = False) -> str:
