@@ -8,13 +8,14 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 from typing import List, Optional, Dict, Tuple
+from tqdm import tqdm
 
 # -------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------
 OUTPUT_FILE = "llm_dataset.jsonl"
 REQUEST_TIMEOUT = 15
-MAX_CONCURRENT = 10  # global concurrency cap across all domains
+MAX_CONCURRENT = 5  # global concurrency cap across all domains
 MAX_RETRIES = 3
 RETRY_BACKOFF = 2
 USER_AGENT = "LLM Dataset Builder/1.0 (+https://myproject.org/bot)"  # honest UA
@@ -468,6 +469,7 @@ async def scrape_urls(urls: List[str], output_file: str):
         open(output_file, "w", encoding="utf-8").close()
 
     connector = aiohttp.TCPConnector(limit=MAX_CONCURRENT * 2)
+    count = 0
     async with aiohttp.ClientSession(connector=connector) as session:
         tasks = [
             scrape_one(
@@ -481,9 +483,14 @@ async def scrape_urls(urls: List[str], output_file: str):
             )
             for url in to_fetch
         ]
-        results = await asyncio.gather(*tasks)
-
-    count = sum(1 for ok in results if ok)
+        # as_completed (not gather) so the bar advances as each URL finishes,
+        # regardless of which order they land in.
+        with tqdm(total=len(tasks), desc="Scraping", unit="url") as progress:
+            for coro in asyncio.as_completed(tasks):
+                ok = await coro
+                if ok:
+                    count += 1
+                progress.update(1)
 
     print(
         f"\n🎉 Done. {count} new documents appended to '{output_file}' (JSONL, one record per line)."

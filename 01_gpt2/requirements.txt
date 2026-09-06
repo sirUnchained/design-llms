@@ -6,3 +6,4 @@ python-dotenv
 tiktoken
 torch
 torchinfo
+tqdm
