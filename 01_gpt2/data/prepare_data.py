@@ -59,6 +59,7 @@ COUNT_TOKENS = False
 # if it doesn't. Run this script once whenever your dataset changes.
 TOKENIZE_TO_BIN = True
 TOKENIZE_CHUNK_CHARS = 50_000_000  # ~50MB of text per chunk while tokenizing
+TOKENIZE_RESUME = True  # resume from a crashed/interrupted tokenization run
 
 # License allowlist (URLs and keywords).
 #
@@ -588,6 +589,95 @@ def get_bin_path(jsonl_path: str) -> str:
     return root + f"_{TOKENIZER_NAME}_tokenizer" + ".bin"
 
 
+def _progress_path(out_path: str) -> str:
+    """
+    ## Derive the sidecar progress-file path for a given .bin output path.
+
+    ---
+
+    Args:
+        out_path (str): Path to the `.bin` file being written.
+
+    Returns:
+        str: Path to the JSON progress file tracking resumable tokenization state.
+    """
+    return out_path + ".progress.json"
+
+
+def _write_progress(progress_path: str, jsonl_offset: int, total_tokens: int):
+    """
+    ## Atomically persist tokenization progress to disk.
+
+    Writes to a temp file first, `fsync`s it to force the bytes onto disk,
+    then `os.replace()`s it over the real progress path. `os.replace` is
+    atomic on both POSIX and Windows, so a crash at any point during this
+    call either leaves the OLD progress file fully intact or the NEW one
+    fully intact -- never a half-written, unreadable file in between.
+
+    ---
+
+    Args:
+        progress_path (str): Path to write the progress sidecar file to.
+        jsonl_offset (int): Opaque file offset (from `f.tell()`) into the
+                            source `.jsonl`, marking how far we've read.
+        total_tokens (int): Total number of tokens written to the `.bin`
+                            file so far.
+
+    Returns:
+        None
+    """
+    tmp_path = progress_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump({"jsonl_offset": jsonl_offset, "total_tokens": total_tokens}, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, progress_path)
+
+
+def _iter_jsonl_text_chunks_with_offset(
+    jsonl_path: str, chunk_chars: int, start_offset: int = 0
+):
+    """
+    ## Yield (text_chunk, offset_after_chunk) pairs from a JSONL dataset.
+
+    Same chunking behavior as before, but seeks to `start_offset` before
+    reading (to support resuming) and yields the file offset immediately
+    after each chunk boundary alongside the chunk itself, so the caller can
+    persist exactly how far it's gotten. Offsets come from `f.tell()` on a
+    text-mode file handle, so they're only ever fed back into `f.seek()` on
+    the same kind of handle -- never interpreted as raw byte counts.
+
+    ---
+
+    Args:
+        jsonl_path (str): Path to the scraped `.jsonl` dataset file.
+        chunk_chars (int): Number of characters to accumulate per yielded chunk.
+        start_offset (int, optional): Offset (from a previous `f.tell()`) to
+                                      resume reading from. Default is 0 (start
+                                      of file).
+
+    Yields:
+        tuple[str, int]: `(chunk_text, offset_after_chunk)`.
+    """
+    buf = ""
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        f.seek(start_offset)
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            buf += record["text"] + "\n"
+            if len(buf) >= chunk_chars:
+                yield buf, f.tell()
+                buf = ""
+        if buf:
+            yield buf, f.tell()
+
+
 def _iter_jsonl_text_chunks(jsonl_path: str, chunk_chars: int):
     """
     ## Yield bounded-size text chunks from a scraped JSONL dataset.
@@ -627,29 +717,36 @@ def tokenize_to_bin(
     out_path: str,
     tokenizer_name: str = TOKENIZER_NAME,
     chunk_chars: int = TOKENIZE_CHUNK_CHARS,
+    resume: bool = TOKENIZE_RESUME,
 ) -> int:
     """
-    ## Tokenize a scraped JSONL dataset into a binary token file, in a single pass.
+    ## Tokenize a scraped JSONL dataset into a binary token file, resumably.
 
-    Reads the dataset in bounded-size text chunks (see
-    `_iter_jsonl_text_chunks`), encodes each chunk with tiktoken, and appends
-    the resulting `uint16` token ids straight onto the end of `out_path` as
-    raw bytes. A plain file handle in append-binary mode grows on disk as we
-    write, so there's no need to know the total token count up front and no
-    need for a second counting pass -- peak RAM stays bounded by
-    `chunk_chars` regardless of dataset size, and the corpus is tokenized
-    exactly once.
+    Reads the dataset in bounded-size text chunks, encodes each chunk with
+    tiktoken, and appends the resulting `uint16` token ids onto `out_path`.
+    Peak RAM stays bounded by `chunk_chars` regardless of dataset size (see
+    `_iter_jsonl_text_chunks_with_offset`), same as before.
 
-    The resulting file has the same on-disk layout a `numpy.memmap` of dtype
-    `uint16` would produce, so training reads it back with
-    `np.memmap(out_path, dtype=np.uint16, mode="r")` -- see
-    `MemmapGPTDataset` / `ensure_bin_dataset` in `src/data/dataset.py`.
+    What's new is crash safety: after every chunk is written to `out_path`,
+    a small sidecar progress file (see `_progress_path`) is updated
+    atomically (see `_write_progress`) recording how far into the source
+    `.jsonl` we've read and how many tokens we've written. If the process
+    is killed, loses power, OOMs, etc. partway through, re-running this
+    function:
 
-    `uint16` is safe for the GPT-2 tokenizer since `vocab_size` (50257) fits
-    under 65536, and it halves storage compared to `int64`.
+    1. Reads the sidecar to find the last confirmed-good position.
+    2. Compares the `.bin` file's actual size against what the sidecar
+       claims. If the `.bin` file has MORE bytes than expected, that means
+       we crashed after writing a chunk's tokens but before updating the
+       sidecar -- so those trailing bytes are truncated off (they're safe
+       to discard and redo, never partially valid).
+    3. Resumes reading the `.jsonl` from the last confirmed offset and
+       continues appending, so nothing already-written is duplicated and
+       nothing is skipped.
 
-    This is meant to be run once, as part of this data-prep script, never
-    during training.
+    On a full, uninterrupted success, the sidecar file is deleted -- its
+    mere presence is what signals "there's a resumable/interrupted run
+    here" the next time this function is called.
 
     ---
 
@@ -663,10 +760,19 @@ def tokenize_to_bin(
         chunk_chars (int, optional):
             Number of characters to accumulate before encoding and writing a
             chunk. Default is `TOKENIZE_CHUNK_CHARS`.
+        resume (bool, optional):
+            If `True` (default) and a progress sidecar from a previous
+            interrupted run exists, resume from it. If `False`, always
+            start fresh, discarding any existing `.bin`/progress file.
 
     Returns:
         int: Total number of tokens written to `out_path`. `0` if
-            `jsonl_path` doesn't exist or contains no records.
+            `jsonl_path` doesn't exist.
+
+    Raises:
+        RuntimeError: If the `.bin` file is smaller than the progress
+            sidecar says it should be -- this means the file was corrupted,
+            truncated, or modified externally, and can't be safely resumed.
     """
     if not os.path.exists(jsonl_path):
         print(f"⚠️ {jsonl_path} not found, skipping tokenization.")
@@ -676,16 +782,69 @@ def tokenize_to_bin(
     import numpy as np
 
     enc = tiktoken.get_encoding(tokenizer_name)
+    progress_path = _progress_path(out_path)
+
+    start_offset = 0
     total_len = 0
+
+    if resume and os.path.exists(progress_path):
+        with open(progress_path, "r", encoding="utf-8") as f:
+            progress = json.load(f)
+        start_offset = progress.get("jsonl_offset", 0)
+        total_len = progress.get("total_tokens", 0)
+
+        expected_bytes = total_len * 2  # uint16 = 2 bytes/token
+        actual_bytes = os.path.getsize(out_path) if os.path.exists(out_path) else 0
+
+        if actual_bytes > expected_bytes:
+            # Crashed after writing bin bytes but before the sidecar update
+            # for that chunk -- roll back the dangling bytes and redo it.
+            with open(out_path, "r+b") as bf:
+                bf.truncate(expected_bytes)
+            print(
+                f"⚠️ Found an incomplete last chunk in '{out_path}', "
+                f"rolled back to the last confirmed {total_len:,} tokens."
+            )
+        elif actual_bytes < expected_bytes:
+            raise RuntimeError(
+                f"Progress file says {total_len:,} tokens should be in '{out_path}', "
+                f"but it only has {actual_bytes // 2:,}. The file may be corrupted "
+                f"or was edited externally. Delete '{out_path}' and '{progress_path}' "
+                f"to start tokenization over from scratch."
+            )
+
+        print(
+            f"↻ Resuming tokenization of '{jsonl_path}' from a previous run "
+            f"({total_len:,} tokens already written)."
+        )
+    else:
+        # Fresh start: wipe any stale output/progress so we don't append onto
+        # leftovers from an unrelated or force-restarted run.
+        open(out_path, "wb").close()
+        if os.path.exists(progress_path):
+            os.remove(progress_path)
 
     print(f"🔤 Tokenizing '{jsonl_path}' -> '{out_path}' ...", flush=True)
 
-    with open(out_path, "wb") as out_f:
-        for chunk in _iter_jsonl_text_chunks(jsonl_path, chunk_chars):
+    with open(out_path, "ab") as out_f:
+        for chunk, offset_after in _iter_jsonl_text_chunks_with_offset(
+            jsonl_path, chunk_chars, start_offset
+        ):
             ids = enc.encode_ordinary(chunk)
             arr = np.array(ids, dtype=np.uint16)
+
             out_f.write(arr.tobytes())
+            out_f.flush()
+            os.fsync(out_f.fileno())  # force bytes to disk before recording progress
+
             total_len += arr.size
+            _write_progress(progress_path, offset_after, total_len)
+
+            print(f"  ...{total_len:,} tokens written so far", flush=True)
+
+    # Clean success: the sidecar's job is done, its absence means "no resume needed".
+    if os.path.exists(progress_path):
+        os.remove(progress_path)
 
     if total_len:
         print(f"✅ Wrote {total_len:,} tokens to '{out_path}'")
