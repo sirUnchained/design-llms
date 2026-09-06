@@ -47,6 +47,7 @@ USER_AGENT = "LLM Dataset Builder/1.0 (+https://myproject.org/bot)"  # honest UA
 TOKENIZER_NAME = "gpt2"
 MAX_CONTENT_BYTES = 5_000_000  # skip/truncate anything larger than ~5MB of HTML
 DEFAULT_CRAWL_DELAY = 1.0  # seconds, used when robots.txt gives no crawl-delay
+COUNT_TOKENS = False
 
 # License allowlist (URLs and keywords).
 #
@@ -573,25 +574,26 @@ if __name__ == "__main__":
 
     asyncio.run(scrape_urls(urls, output_file))
 
-    # Tokenize the entire dataset (only if file exists and has content)
-    try:
-        import tiktoken
+    if COUNT_TOKENS:
+        # Tokenize the entire dataset (only if file exists and has content)
+        try:
+            import tiktoken
 
-        total_tokens = 0
-        tokenizer = tiktoken.get_encoding(TOKENIZER_NAME)
-        with open(output_file, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                record = json.loads(line)
-                total_tokens += len(tokenizer.encode(record["text"]))
+            total_tokens = 0
+            tokenizer = tiktoken.get_encoding(TOKENIZER_NAME)
+            with open(output_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    record = json.loads(line)
+                    total_tokens += len(tokenizer.encode(record["text"]))
 
-        if total_tokens:
-            print(
-                f"Your dataset has {total_tokens} tokens (using {TOKENIZER_NAME} tokenizer)."
-            )
-        else:
-            print("The output file is empty. No tokens to count.")
-    except FileNotFoundError:
-        print(f"File '{output_file}' not found. No data scraped successfully.")
+            if total_tokens:
+                print(
+                    f"Your dataset has {total_tokens} tokens (using {TOKENIZER_NAME} tokenizer)."
+                )
+            else:
+                print("The output file is empty. No tokens to count.")
+        except FileNotFoundError:
+            print(f"File '{output_file}' not found. No data scraped successfully.")
