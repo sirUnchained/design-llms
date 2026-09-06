@@ -8,7 +8,7 @@ from scripts.evaluate import (
     token_ids_to_text,
 )
 from configs.model_configs import get_gpt_configs, GPT_configs
-from src.data.dataset import create_dataloader, load_text_data
+from src.data.pretrain_dataset.dataset import create_dataloader, prepare_bin_dataset
 from src.training.train import train_model
 from src.models.gpt_model import GPT_model
 from src.utils.save_model_hf import save_model_hf, ensure_huggingface_login
@@ -134,37 +134,37 @@ def generate(model, cfg: GPT_configs, prompt: str, seed=None):
 
 
 def train(model: GPT_model, cfg: GPT_configs):
-    # ==== LOAD TEXT AND SPLIT IT ====
-    text = load_text_data(cfg)
+    # ==== TOKENIZE ONCE (CACHED) AND BUILD TRAIN/VAL LOADERS FROM ONE BIN FILE ====
+    bin_path = prepare_bin_dataset(cfg)
     train_ratio = 0.80
-    split_idx = int(train_ratio * len(text))
-    train_data = text[:split_idx]
-    val_data = text[split_idx:]
 
-    # ==== TOKENIZE DATASET AND CREATE VAL AND TRAIN LOADERS ====
     tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)
     train_loader = create_dataloader(
-        train_data,
+        bin_path,
         batch_size=cfg.batch_size,
         max_length=cfg.context_length,
         stride=cfg.context_length,
         drop_last=True,
         shuffle=True,
-        num_workers=0,
+        num_workers=4,
+        start_frac=0.0,
+        end_frac=train_ratio,
     )
     val_loader = create_dataloader(
-        val_data,
+        bin_path,
         batch_size=cfg.batch_size,
         max_length=cfg.context_length,
         stride=cfg.context_length,
         drop_last=False,
         shuffle=False,
         num_workers=0,
+        start_frac=train_ratio,
+        end_frac=1.0,
     )
 
     # ==== SETUP EPOCHS DEVICE AND OPTIMIZER ====
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.to(device=device, dtype=torch.bfloat16)
+    model.to(device=device)
     optim = torch.optim.AdamW(params=model.parameters(), lr=4e-4, weight_decay=0.1)
 
     # ==== TRAIN MODEL ====
