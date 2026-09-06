@@ -118,7 +118,7 @@ class MemmapGPTDataset(Dataset):
         return x, y
 
 
-def get_bin_path(data_path: str) -> str:
+def get_bin_path(data_path: str, tokenizer: str) -> str:
     """
     ## Derive the tokenized binary path for a given raw data path.
 
@@ -134,7 +134,7 @@ def get_bin_path(data_path: str) -> str:
         str: Path to the corresponding `.bin` tokenized file.
     """
     root, _ = os.path.splitext(data_path)
-    return root + ".bin"
+    return root + f"_{tokenizer}_tokenizer" + ".bin"
 
 
 def prepare_bin_dataset(cfg: GPT_configs, force: bool = False) -> str:
@@ -158,7 +158,7 @@ def prepare_bin_dataset(cfg: GPT_configs, force: bool = False) -> str:
     Returns:
         str: Path to the ready-to-use tokenized `.bin` file.
     """
-    bin_path = get_bin_path(cfg.data_path)
+    bin_path = get_bin_path(cfg.data_path, cfg.ticktoken_tokenizer)
 
     if force or not os.path.exists(bin_path):
         print(
