@@ -128,7 +128,7 @@ def train_model(
                 track_tokens_seen.append(tokens_seen)
 
                 print(
-                    f"Epoch {epoch+1} (Step {global_step:06d}): "
+                    f"Epoch {epoch+1} (Step {global_step:012d}): "
                     f"Train loss {train_loss:.3f} | "
                     f"Val loss {val_loss:.3f} | "
                     f"Train PPL {calc_perplexity(train_loss):.3f} | "
