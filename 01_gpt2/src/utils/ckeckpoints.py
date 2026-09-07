@@ -64,6 +64,7 @@ def save_checkpoint(
     train_losses,
     val_losses,
     track_tokens_seen,
+    scaler=None,
 ):
     """Save everything needed to exactly resume training, and mirror it to the
     `check-points` folder of the configured Hugging Face repo (`REPO_ID`).
@@ -72,7 +73,7 @@ def save_checkpoint(
     and only the local save happens, same as before.
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    torch.save(
+    state = (
         {
             "epoch": epoch,
             "global_step": global_step,
@@ -83,8 +84,11 @@ def save_checkpoint(
             "val_losses": val_losses,
             "track_tokens_seen": track_tokens_seen,
         },
-        path,
     )
+    if scaler is not None:
+        state["scaler_state_dict"] = scaler.state_dict()
+    torch.save(state, path)
+
     print(f"Checkpoint saved to {path}")
 
     repo_id = _repo_id()
