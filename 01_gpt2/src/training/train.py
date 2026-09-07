@@ -73,6 +73,7 @@ def train_model(
         The learning rate is dynamically adjusted inside the loop via
         `learning_rate_change`, which is expected to be defined in the outer scope.
     """
+    scaler = torch.amp.GradScaler(device="cuda", enabled=(device == "cuda"))
 
     train_losses, val_losses, track_tokens_seen = [], [], []
     tokens_seen, global_step = 0, -1
@@ -90,6 +91,8 @@ def train_model(
         train_losses = checkpoint["train_losses"]
         val_losses = checkpoint["val_losses"]
         track_tokens_seen = checkpoint["track_tokens_seen"]
+        if "scaler_state_dict" in checkpoint:
+            scaler.load_state_dict(checkpoint["scaler_state_dict"])
     elif use_checkpoints:
         print(
             f"`use_checkpoints` is true but no checkpoint found at {latest_ckpt_path}, starting fresh."
@@ -100,9 +103,15 @@ def train_model(
 
         for input_batch, target_batch in train_dataloader:
             optimizer.zero_grad()
-            loss = calc_batch_cost(input_batch, target_batch, model, device)
-            loss.backward()
-            optimizer.step()
+            with torch.amp.autocast(
+                device_type="cuda", dtype=torch.float16, enabled=(device == "cuda")
+            ):
+                loss = calc_batch_cost(input_batch, target_batch, model, device)
+            # loss.backward()
+            # optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             tokens_seen += input_batch.numel()
             global_step += 1
@@ -143,6 +152,7 @@ def train_model(
                     train_losses,
                     val_losses,
                     track_tokens_seen,
+                    scaler=scaler,
                 )
 
         generate_and_print_sample(model, tokenizer, device, start_context)
@@ -160,6 +170,7 @@ def train_model(
                 train_losses,
                 val_losses,
                 track_tokens_seen,
+                scaler=scaler,
             )
             # also update "latest" so resuming picks up here
             save_checkpoint(
@@ -172,6 +183,7 @@ def train_model(
                 train_losses,
                 val_losses,
                 track_tokens_seen,
+                scaler=scaler,
             )
 
     return train_losses, val_losses, track_tokens_seen
@@ -200,7 +212,9 @@ def evaluate_model(model, train_dataloader, val_dataloader, device, eval_iter):
                the average cross-entropy loss over the respective dataloader.
     """
     model.eval()
-    with torch.no_grad():
+    with torch.no_grad(), torch.amp.autocast(
+        device_type="cuda", dtype=torch.float16, enabled=(device == "cuda")
+    ):
         train_loss = calc_loader_cost(train_dataloader, model, device, eval_iter)
         val_loss = calc_loader_cost(val_dataloader, model, device, eval_iter)
     model.train()
