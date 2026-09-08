@@ -1,5 +1,6 @@
-from torch import nn
 import torch
+from torch import nn
+from torch.utils.checkpoint import checkpoint
 from torchinfo import summary
 
 from configs.model_configs import GPT_configs
@@ -25,8 +26,10 @@ class GPT_model(nn.Module):
             - qkv_bias (bool): Whether to use bias in attention linear layers.
     """
 
-    def __init__(self, cfg: GPT_configs) -> None:
+    def __init__(self, cfg: GPT_configs, use_checkpointing: bool = False) -> None:
         super().__init__()
+
+        self.use_checkpointing = use_checkpointing
 
         self.tok_emb = nn.Embedding(
             num_embeddings=cfg.vocab_size, embedding_dim=cfg.emb_dim
@@ -37,8 +40,10 @@ class GPT_model(nn.Module):
 
         self.dropout = nn.Dropout(p=cfg.drop_rate)
 
-        self.transformer_blocks = nn.Sequential(
-            *list(TransformerBlock(cfg) for _ in range(cfg.n_layers))
+        # ModuleList instead of Sequential — we need to loop manually to
+        # conditionally checkpoint each block.
+        self.transformer_blocks = nn.ModuleList(
+            [TransformerBlock(cfg) for _ in range(cfg.n_layers)]
         )
 
         self.final_norm = LayerNormalizer(emb_dim=cfg.emb_dim)
@@ -77,7 +82,12 @@ class GPT_model(nn.Module):
         x = self.dropout(x)
 
         # ==== GIVE OUR EMBEDDINGS TO TRANSFORMER BLOCKS ====
-        x = self.transformer_blocks(x)
+        # Note that here we are using checkpointing
+        for block in self.transformer_blocks:
+            if self.use_checkpointing and self.training:
+                x = checkpoint(block, x, use_reentrant=False)
+            else:
+                x = block(x)
 
         # ==== APPLY FINAL LAYER NORMALIZER ====
         x = self.final_norm(x)
