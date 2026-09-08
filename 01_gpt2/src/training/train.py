@@ -70,12 +70,10 @@ def train_model(
         tuple: A 3-element tuple containing:
             - train_losses (list): Recorded average training losses at each evaluation step.
             - val_losses (list): Recorded average validation losses at each evaluation step.
-            - track_tokens_seen (list): Cumulative number of tokens processed at each
-                                        evaluation step, used for plotting loss vs. tokens.
+            - track_tokens_seen (list): Cumulative number of tokens processed at each evaluation step, used for plotting loss vs. tokens.
 
     Note:
-        The learning rate is dynamically adjusted inside the loop via
-        `learning_rate_change`, which is expected to be defined in the outer scope.
+        The learning rate is dynamically adjusted inside the loop via `learning_rate_change`, which is expected to be defined in the outer scope.
     """
 
     train_losses, val_losses, track_tokens_seen = [], [], []
@@ -86,7 +84,7 @@ def train_model(
     latest_ckpt_path = os.path.join(checkpoint_path, "latest.pt")
     os.makedirs("./training-process", exist_ok=True)
 
-    # --- Resume from checkpoint if requested and available ---
+    # Resume from checkpoint if requested and available
     if use_checkpoints and os.path.exists(latest_ckpt_path):
         checkpoint = load_checkpoint(latest_ckpt_path, model, optimizer, device)
         start_epoch = checkpoint["epoch"]
@@ -112,7 +110,7 @@ def train_model(
             tokens_seen += input_batch.numel()
             global_step += 1
 
-            # lr = learning_rate_change(global_step, total_steps, 0.2, optimizer)
+            lr = learning_rate_change(global_step, total_steps, 0.2, optimizer)
 
             if global_step % eval_freq == 0:
                 # Evaluate model and it the returned
@@ -125,7 +123,7 @@ def train_model(
                 track_tokens_seen.append(tokens_seen)
 
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                lr = optimizer.param_groups[0]["lr"]
+                # lr = optimizer.param_groups[0]["lr"]
                 if not torch.cuda.is_available():
                     allocated = 0.0
                     reserved = 0.0
@@ -165,7 +163,7 @@ def train_model(
                 with open("./training-process/logs.jsonl", "a") as f:
                     f.write(json.dumps(log_data) + "\n")
 
-            # --- Periodic checkpoint save ---
+            # Periodic checkpoint save
             if (
                 create_checkpoints
                 and global_step % checkpoint_freq == 0
@@ -185,7 +183,7 @@ def train_model(
 
         generate_and_print_sample(model, tokenizer, device, start_context)
 
-        # --- End-of-epoch checkpoint save ---
+        # End-of-epoch checkpoint save
         if create_checkpoints:
             epoch_ckpt_path = os.path.join(checkpoint_path, f"epoch_{epoch+1}.pt")
             save_checkpoint(
@@ -257,9 +255,8 @@ def generate_and_print_sample(model, tokenizer, device, start_context):
     """
     ## Generate a text sample from the model and print it.
 
-    Useful for monitoring training progress: after each epoch, this function
-    generates a fixed number of tokens (10) conditioned on `start_context`
-    and prints the resulting text on a single line.
+    Useful for monitoring training progress: after each epoch, this function generates a fixed number of
+    tokens (10) conditioned on `start_context` and prints the resulting text on a single line.
 
     ---
 
