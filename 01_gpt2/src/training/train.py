@@ -283,8 +283,8 @@ def learning_rate_change(
     total_training_steps: int,
     warmup_percent: float,
     optimizer: torch.optim.Optimizer,
-    initial_lr=1e-4,
-    peak_lr=1e-4,
+    initial_lr=1e-6,
+    peak_lr=3e-4,
 ) -> float:
     """
     ## Update the optimizer's learning rate using a warmup then cosine decay schedule.
@@ -297,7 +297,7 @@ def learning_rate_change(
         total_training_steps (int): Total number of training steps.
         warmup_percent (float): Fraction of total steps used for warmup (e.g., 0.1 for 10%).
         optimizer (torch.optim.Optimizer): Optimizer whose learning rate will be updated.
-        initial_lr (float, optional): Starting learning rate before warmup. Default 1e-5.
+        initial_lr (float, optional): Starting learning rate before warmup. Default 1e-6.
         peak_lr (float, optional): Maximum learning rate reached at the end of warmup. Default 3e-4.
 
     Returns:
