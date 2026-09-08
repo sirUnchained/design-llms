@@ -113,14 +113,12 @@ def train_model(
             tokens_seen += input_batch.numel()
             global_step += 1
 
-            if global_step == 0:
-                print(
-                    f"AFTER STEP 1 — allocated: {torch.cuda.memory_allocated()/1e9:.3f} GB, "
-                    f"reserved: {torch.cuda.memory_reserved()/1e9:.3f} GB, "
-                    f"peak: {torch.cuda.max_memory_allocated()/1e9:.3f} GB"
-                )
-            if global_step >= 5:
-                break
+            print(
+                f"AFTER STEP 1 — allocated: {torch.cuda.memory_allocated()/1e9:.3f} GB, "
+                f"reserved: {torch.cuda.memory_reserved()/1e9:.3f} GB, "
+                f"peak: {torch.cuda.max_memory_allocated()/1e9:.3f} GB"
+            )
+            return
 
             # lr = learning_rate_change(global_step, total_steps, 0.2, optimizer)
 
