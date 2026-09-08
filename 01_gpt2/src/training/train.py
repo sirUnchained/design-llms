@@ -1,5 +1,6 @@
 import os
 import math
+from datetime import datetime
 
 import torch
 import tiktoken
@@ -121,9 +122,11 @@ def train_model(
 
                 track_tokens_seen.append(tokens_seen)
 
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 lr = optimizer.param_groups[0]["lr"]
 
                 log = (
+                    f"[{timestamp}] "
                     f"Epoch {epoch+1} (Step {global_step:012d}): "
                     f"Train loss {train_loss:.3f} | "
                     f"Val loss {val_loss:.3f} | "
@@ -131,7 +134,7 @@ def train_model(
                     f"Val PPL {calc_perplexity(val_loss):.3f} | "
                     f"LR {lr:.3e}"
                 )
-                print(log)
+                print(log, flush=True)
 
                 with open("./training-process/logs.log", "a") as f:
                     f.write(log + "\n")
