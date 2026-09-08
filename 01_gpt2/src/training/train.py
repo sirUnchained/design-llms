@@ -118,7 +118,6 @@ def train_model(
                 f"reserved: {torch.cuda.memory_reserved()/1e9:.3f} GB, "
                 f"peak: {torch.cuda.max_memory_allocated()/1e9:.3f} GB"
             )
-            return
 
             # lr = learning_rate_change(global_step, total_steps, 0.2, optimizer)
 
