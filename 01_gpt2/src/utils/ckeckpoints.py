@@ -73,18 +73,17 @@ def save_checkpoint(
     and only the local save happens, same as before.
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    state = (
-        {
-            "epoch": epoch,
-            "global_step": global_step,
-            "tokens_seen": tokens_seen,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "train_losses": train_losses,
-            "val_losses": val_losses,
-            "track_tokens_seen": track_tokens_seen,
-        },
-    )
+    state = {
+        "epoch": epoch,
+        "global_step": global_step,
+        "tokens_seen": tokens_seen,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "train_losses": train_losses,
+        "val_losses": val_losses,
+        "track_tokens_seen": track_tokens_seen,
+    }
+
     if scaler is not None:
         state["scaler_state_dict"] = scaler.state_dict()
     torch.save(state, path)
