@@ -38,13 +38,10 @@ def main():
         ensure_huggingface_login(cfg=cfg)
 
     if "-t" in args:
-        if not load_model_if_exists(cfg, model, device):
-            print("start train process ...")
-            torch.manual_seed(42)
-            train(model, cfg)
-            print("training process finished, Now you can use model.")
-        else:
-            print("Model is already trained, we loaded it.")
+        print("start train process ...")
+        torch.manual_seed(42)
+        train(model, cfg)
+        print("training process finished, Now you can use model.")
         return 0
 
     if "-g" in args:
@@ -76,13 +73,11 @@ def main():
             return 0
 
         elif inp == "t":
-            if not load_model_if_exists(cfg, model, device):
-                print("start train process ...")
-                torch.manual_seed(42)
-                train(model, cfg)
-                print("training process finished, Now you can use model.")
-                return 0
-            print("Model is already trained, we loaded it.")
+            print("start train process ...")
+            torch.manual_seed(42)
+            train(model, cfg)
+            print("training process finished, Now you can use model.")
+            return 0
 
         elif inp == "g":
             if load_model_if_exists(cfg, model, device):
