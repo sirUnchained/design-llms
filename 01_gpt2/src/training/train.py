@@ -1,6 +1,7 @@
 import os
 import math
 from datetime import datetime
+import json
 
 import torch
 import tiktoken
@@ -25,7 +26,7 @@ def train_model(
     start_context,
     tokenizer,
     checkpoint_path: str,
-    checkpoint_freq: int = 1000,  # save every N global steps, in addition to per-epoch
+    checkpoint_freq: int = 1000,
     use_checkpoints=False,
     create_checkpoints=False,
 ):
@@ -114,30 +115,47 @@ def train_model(
             # lr = learning_rate_change(global_step, total_steps, 0.2, optimizer)
 
             if global_step % eval_freq == 0:
+                # Evaluate model and it the returned
                 train_loss, val_loss = evaluate_model(
                     model, train_dataloader, val_dataloader, device, eval_iter
                 )
-                train_losses.append(train_loss.item())  # type: ignore
-                val_losses.append(val_loss.item())  # type: ignore
 
+                train_losses.append(train_loss)
+                val_losses.append(val_loss)
                 track_tokens_seen.append(tokens_seen)
 
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 lr = optimizer.param_groups[0]["lr"]
+                if not torch.cuda.is_available():
+                    allocated = 0.0
+                    reserved = 0.0
+                    total = 0.0
+                else:
+                    # Getting some data about GPU so I may decide to use another approach
+                    # and all these data is saving as GB.
+                    allocated = torch.cuda.memory_allocated(device) / 1024**3
+                    reserved = torch.cuda.memory_reserved(device) / 1024**3
+                    total = (
+                        torch.cuda.get_device_properties(device).total_memory / 1024**3
+                    )
 
-                log = (
-                    f"[{timestamp}] "
-                    f"Epoch {epoch+1} (Step {global_step:012d}): "
-                    f"Train loss {train_loss:.3f} | "
-                    f"Val loss {val_loss:.3f} | "
-                    f"Train PPL {calc_perplexity(train_loss):.3f} | "
-                    f"Val PPL {calc_perplexity(val_loss):.3f} | "
-                    f"LR {lr:.3e}"
-                )
-                print(log, flush=True)
+                log_data = {
+                    "timestamp": timestamp,
+                    "epoch": epoch + 1,
+                    "step": global_step,
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                    "train_ppl": calc_perplexity(train_loss),
+                    "val_ppl": calc_perplexity(val_loss),
+                    "lr": lr,
+                    "GPU_allocated_VRAM": allocated,
+                    "GPU_reserved_VRAM": reserved,
+                    "GPU_total_VRAM": total,
+                }
+                print(log_data, flush=True)
 
-                with open("./training-process/logs.log", "a") as f:
-                    f.write(log + "\n")
+                with open("./training-process/logs.jsonl", "a") as f:
+                    f.write(json.dumps(log_data) + "\n")
 
             # --- Periodic checkpoint save ---
             if (
@@ -211,11 +229,19 @@ def evaluate_model(model, train_dataloader, val_dataloader, device, eval_iter):
         tuple: (train_loss, val_loss) where each is a scalar tensor representing
                the average cross-entropy loss over the respective dataloader.
     """
+    # Evaluate model
     model.eval()
     with torch.no_grad():
         train_loss = calc_loader_cost(train_dataloader, model, device, eval_iter)
         val_loss = calc_loader_cost(val_dataloader, model, device, eval_iter)
     model.train()
+
+    # Turn the tensores into numbers
+    train_loss = (
+        train_loss.item() if isinstance(train_loss, torch.Tensor) else train_loss
+    )
+    val_loss = val_loss.item() if isinstance(val_loss, torch.Tensor) else val_loss
+
     return train_loss, val_loss
 
 
