@@ -98,7 +98,7 @@ def train_model(
     for epoch in range(start_epoch, num_epochs):
         model.train()
 
-        for input_batch, target_batch in train_dataloader:
+        for step, (input_batch, target_batch) in enumerate(train_dataloader):
             optimizer.zero_grad()
             loss = calc_batch_cost(input_batch, target_batch, model, device)
             loss.backward()
