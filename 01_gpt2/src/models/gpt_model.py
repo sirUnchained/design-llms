@@ -24,6 +24,9 @@ class GPT_model(nn.Module):
             - drop_rate (float): Dropout probability.
             - n_layers (int): Number of transformer blocks.
             - qkv_bias (bool): Whether to use bias in attention linear layers.
+        use_checkpointing (bool): If set True then we use checkpoint the transformer
+            Blocks so it can help us to save GPU memory but with slower training so
+            we set default to False.
     """
 
     def __init__(self, cfg: GPT_configs, use_checkpointing: bool = False) -> None:
