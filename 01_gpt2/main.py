@@ -31,7 +31,7 @@ def main():
     print("Welcome to the gpt2 model pipeline! loading stuff please wait ...")
     cfg = get_gpt_configs()
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = GPT_model(cfg).to(device=device)
+    model = GPT_model(cfg, use_checkpointing=True).to(device=device)
     print(f"Current device is {device}.")
 
     if cfg.repo_id != "INVALID":
