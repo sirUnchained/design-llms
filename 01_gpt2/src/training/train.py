@@ -95,6 +95,12 @@ def train_model(
             f"`use_checkpoints` is true but no checkpoint found at {latest_ckpt_path}, starting fresh."
         )
 
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.empty_cache()
+    print(
+        f"BEFORE — allocated: {torch.cuda.memory_allocated()/1e9:.3f} GB, reserved: {torch.cuda.memory_reserved()/1e9:.3f} GB"
+    )
+
     for epoch in range(start_epoch, num_epochs):
         model.train()
 
@@ -106,6 +112,15 @@ def train_model(
 
             tokens_seen += input_batch.numel()
             global_step += 1
+
+            if global_step == 0:
+                print(
+                    f"AFTER STEP 1 — allocated: {torch.cuda.memory_allocated()/1e9:.3f} GB, "
+                    f"reserved: {torch.cuda.memory_reserved()/1e9:.3f} GB, "
+                    f"peak: {torch.cuda.max_memory_allocated()/1e9:.3f} GB"
+                )
+            if global_step == 5:
+                break
 
             # lr = learning_rate_change(global_step, total_steps, 0.2, optimizer)
 
@@ -144,7 +159,8 @@ def train_model(
                     val_losses,
                     track_tokens_seen,
                 )
-
+        print(f"model.use_checkpointing = {model.use_checkpointing}")
+        print(f"model.training = {model.training}")
         generate_and_print_sample(model, tokenizer, device, start_context)
 
         # --- End-of-epoch checkpoint save ---
