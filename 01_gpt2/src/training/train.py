@@ -287,7 +287,7 @@ def learning_rate_change(
     total_training_steps: int,
     warmup_percent: float,
     optimizer: torch.optim.Optimizer,
-    initial_lr=1e-6,
+    initial_lr=4e-5,
     peak_lr=3e-4,
 ) -> float:
     """
