@@ -42,6 +42,8 @@ def train_model(
     `latest.pt` in `checkpoint_path`. When saving (`create_checkpoints=True`), it writes
     periodic snapshots (`latest.pt` and epoch-named files) to the same directory.
 
+    We save the train process in the `training-process` folder, so you can monitor it.
+
     Args:
         model (torch.nn.Module): The language model to be trained.
         train_dataloader (DataLoader): DataLoader yielding training batches.
@@ -80,6 +82,7 @@ def train_model(
     start_epoch = 0
 
     latest_ckpt_path = os.path.join(checkpoint_path, "latest.pt")
+    os.makedirs("./training-process", exist_ok=True)
 
     # --- Resume from checkpoint if requested and available ---
     if use_checkpoints and os.path.exists(latest_ckpt_path):
@@ -118,14 +121,20 @@ def train_model(
 
                 track_tokens_seen.append(tokens_seen)
 
-                print(
-                    f"Epoch {epoch+1} (Step {global_step:06d}): "
+                lr = optimizer.param_groups[0]["lr"]
+
+                log = (
+                    f"Epoch {epoch+1} (Step {global_step:012d}): "
                     f"Train loss {train_loss:.3f} | "
                     f"Val loss {val_loss:.3f} | "
                     f"Train PPL {calc_perplexity(train_loss):.3f} | "
                     f"Val PPL {calc_perplexity(val_loss):.3f} | "
-                    # f"LR {lr:.3e}"
+                    f"LR {lr:.3e}"
                 )
+                print(log)
+
+                with open("./training-process/logs.log", "a") as f:
+                    f.write(log + "\n")
 
             # --- Periodic checkpoint save ---
             if (
