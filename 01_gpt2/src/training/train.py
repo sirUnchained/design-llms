@@ -93,6 +93,7 @@ def train_model(
         train_losses = checkpoint["train_losses"]
         val_losses = checkpoint["val_losses"]
         track_tokens_seen = checkpoint["track_tokens_seen"]
+        total_steps = checkpoint.get("total_steps", total_steps)
     elif use_checkpoints:
         print(
             f"`use_checkpoints` is true but no checkpoint found at {latest_ckpt_path}, starting fresh."
@@ -110,7 +111,7 @@ def train_model(
             tokens_seen += input_batch.numel()
             global_step += 1
 
-            lr = learning_rate_change(global_step, total_steps, 0.01, optimizer)
+            lr = learning_rate_change(global_step, total_steps, 0.1, optimizer)
 
             if global_step % eval_freq == 0:
                 # Evaluate model and it the returned
@@ -178,6 +179,7 @@ def train_model(
                     train_losses,
                     val_losses,
                     track_tokens_seen,
+                    total_steps,
                 )
 
         generate_and_print_sample(model, tokenizer, device, start_context)
@@ -195,6 +197,7 @@ def train_model(
                 train_losses,
                 val_losses,
                 track_tokens_seen,
+                total_steps,
             )
             # also update "latest" so resuming picks up here
             save_checkpoint(
@@ -207,6 +210,7 @@ def train_model(
                 train_losses,
                 val_losses,
                 track_tokens_seen,
+                total_steps,
             )
 
     return train_losses, val_losses, track_tokens_seen
@@ -306,7 +310,7 @@ def learning_rate_change(
 
     warmup_steps = int(warmup_percent * total_training_steps)
     lr_increment = (peak_lr - initial_lr) / warmup_steps if warmup_steps > 0 else 0
-    min_lr = 0.1 * initial_lr
+    min_lr = 0.1 * peak_lr
 
     if global_step < warmup_steps:
         # Linear increase
