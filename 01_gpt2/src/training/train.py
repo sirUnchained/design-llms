@@ -101,7 +101,7 @@ def train_model(
     for epoch in range(start_epoch, num_epochs):
         model.train()
 
-        for input_batch, target_batch in train_dataloader:
+        for step, (input_batch, target_batch) in enumerate(train_dataloader):
             optimizer.zero_grad()
             with torch.amp.autocast(
                 device_type="cuda", dtype=torch.float16, enabled=(device == "cuda")
