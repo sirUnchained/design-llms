@@ -152,7 +152,15 @@ def train_model(
                     "GPU_reserved_VRAM": reserved,
                     "GPU_total_VRAM": total,
                 }
-                print(log_data, flush=True)
+                print(
+                    f"[{timestamp}] "
+                    f"Epoch {epoch+1:03d} (Step {global_step:08d}): "
+                    f"Train {train_loss:.4f} | Val {val_loss:.4f} | "
+                    f"PPL {calc_perplexity(train_loss):.2f}/{calc_perplexity(val_loss):.2f} | "
+                    f"LR {lr:.2e} | "
+                    f"VRAM {allocated:.2f}/{total:.2f}GB",
+                    flush=True,
+                )
 
                 with open("./training-process/logs.jsonl", "a") as f:
                     f.write(json.dumps(log_data) + "\n")
