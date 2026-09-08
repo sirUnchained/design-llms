@@ -110,7 +110,7 @@ def train_model(
             tokens_seen += input_batch.numel()
             global_step += 1
 
-            lr = learning_rate_change(global_step, total_steps, 0.2, optimizer)
+            lr = learning_rate_change(global_step, total_steps, 0.01, optimizer)
 
             if global_step % eval_freq == 0:
                 # Evaluate model and it the returned
@@ -285,7 +285,7 @@ def learning_rate_change(
     warmup_percent: float,
     optimizer: torch.optim.Optimizer,
     initial_lr=1e-4,
-    peak_lr=1e-1,
+    peak_lr=4e-4,
 ) -> float:
     """
     ## Update the optimizer's learning rate using a warmup then cosine decay schedule.
