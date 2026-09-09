@@ -11,9 +11,8 @@ class GPT_model(nn.Module):
     """
     ## A Generative Pre-trained Transformer (GPT) language model.
 
-    This implementation includes token and positional embeddings, dropout,
-    a stack of transformer blocks, final layer normalization, and an output
-    linear head that projects to vocabulary size.
+    This implementation includes token and positional embeddings, dropout, a stack of transformer blocks, 
+    final layer normalization, and an output linear head that projects to vocabulary size.
 
     Args:
         cfg (GPT_configs): Configuration object containing model hyperparameters:

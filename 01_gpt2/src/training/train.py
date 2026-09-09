@@ -34,16 +34,12 @@ def train_model(
     """
     Trains a language model over multiple epochs with periodic evaluation and checkpointing.
 
-    The training loop iterates over batches from `train_dataloader`, computes the loss via
-    `calc_batch_cost`, backpropagates, and updates the model weights. At intervals defined
-    by `eval_freq` (global steps), the model is evaluated on the `eval_iter` batch size of training and validation
-    datasets, and the losses are recorded. After each complete epoch, a text sample is
-    generated using `start_context` to monitor qualitative performance.
+    The training loop iterates over batches from `train_dataloader`, computes the loss via `calc_batch_cost`, backpropagates, and updates the model weights.
+    At intervals defined by `eval_freq` (global steps), the model is evaluated on the `eval_iter` batch size of training and validationdatasets, and the losses are recorded.
+    After each complete epoch, a text sample is generated using `start_context` to monitor qualitative performance.
 
-    Checkpointing is managed by the boolean parameters `use_checkpoints` and
-    `create_checkpoints`. When resuming (`use_checkpoints=True`), the function looks for
-    `latest.pt` in `checkpoint_path`. When saving (`create_checkpoints=True`), it writes
-    periodic snapshots (`latest.pt` and epoch-named files) to the same directory.
+    Checkpointing is managed by the boolean parameters `use_checkpoints` and `create_checkpoints`. When resuming (`use_checkpoints=True`), the function looks for
+    `latest.pt` in `checkpoint_path`. When saving (`create_checkpoints=True`), it writes periodic snapshots (`latest.pt` and epoch-named files) to the same directory.
 
     We save the train process in the `training-process` folder, so you can monitor it.
 
@@ -112,7 +108,6 @@ def train_model(
             tokens_seen += input_batch.numel()
             global_step += 1
 
-            schedule_start_step = 17000
             lr = learning_rate_change(
                 global_step - lr_schedule_step, total_steps, 0.0, optimizer
             )
@@ -224,9 +219,8 @@ def evaluate_model(model, train_dataloader, val_dataloader, device, eval_iter):
     """
     ## Evaluate the model on the training and validation dataloaders.
 
-    This function computes the average loss over all batches in the training
-    and validation sets using `calc_loader_cost`. The model is temporarily
-    set to evaluation mode, and then restored to training mode.
+    This function computes the average loss over all batches in the training and validation sets using `calc_loader_cost`.
+    The model is temporarily set to evaluation mode, and then restored to training mode.
 
     ---
 
