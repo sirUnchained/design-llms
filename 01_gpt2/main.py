@@ -120,7 +120,7 @@ def generate(model, cfg: GPT_configs, prompt: str, seed=None):
         model=model,
         idx=text_to_token_ids(text=prompt, tokenizer=tokenizer),
         context_size=cfg.context_length,
-        max_new_tokens=512,
+        max_new_tokens=256,
         top_k=90,
         temperature=0.7,
     )
