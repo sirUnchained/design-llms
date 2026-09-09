@@ -111,7 +111,10 @@ def train_model(
             tokens_seen += input_batch.numel()
             global_step += 1
 
-            lr = learning_rate_change(0, total_steps, 0.0, optimizer)
+            schedule_start_step = 17000
+            lr = learning_rate_change(
+                global_step - schedule_start_step, total_steps, 0.0, optimizer
+            )
 
             if global_step % eval_freq == 0:
                 # Evaluate model and it the returned
