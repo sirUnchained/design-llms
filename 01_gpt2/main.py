@@ -124,7 +124,7 @@ def generate(model, cfg: GPT_configs, prompt: str, seed=None):
         model=model,
         idx=user_input,
         context_size=cfg.context_length,
-        max_new_tokens=256,
+        max_new_tokens=128,
         top_k=90,
         temperature=0.3,
     )
