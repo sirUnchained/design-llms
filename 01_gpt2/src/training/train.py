@@ -25,6 +25,7 @@ def train_model(
     eval_iter,
     start_context,
     tokenizer,
+    lr_schedule_step: int,
     checkpoint_path: str,
     checkpoint_freq: int = 1000,
     use_checkpoints=False,
@@ -113,7 +114,7 @@ def train_model(
 
             schedule_start_step = 17000
             lr = learning_rate_change(
-                global_step - schedule_start_step, total_steps, 0.0, optimizer
+                global_step - lr_schedule_step, total_steps, 0.0, optimizer
             )
 
             if global_step % eval_freq == 0:
@@ -376,6 +377,7 @@ if __name__ == "__main__":
         device,
         eval_freq=5,
         eval_iter=5,
+        lr_schedule_step=cfg.lr_schedule_step,
         start_context="Hello I am ",
         tokenizer=tokenizer,
         checkpoint_path=cfg.checkpoints_path,

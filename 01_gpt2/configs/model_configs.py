@@ -6,6 +6,7 @@ import os
 class GPT_configs:
     epochs = 5
     batch_size = 2
+
     vocab_size = 50257
     context_length = 1024
     emb_dim = 768
@@ -13,6 +14,9 @@ class GPT_configs:
     n_layers = 12
     drop_rate = 0.1
     qkv_bias = False
+
+    lr_schedule_step = 0
+
     ticktoken_tokenizer = "gpt2"
     data_path = "./data/llm_dataset.txt"
     save_model_path = "model-weights/"
@@ -43,6 +47,11 @@ def get_gpt_configs():
         "1",
         "yes",
     )
+
+    config.lr_schedule_step = int(
+        os.getenv("LR_SCHEDULE_STEP", "0"), config.lr_schedule_step
+    )
+
     config.ticktoken_tokenizer = os.getenv("TOKENIZER", config.ticktoken_tokenizer)
     config.data_path = os.getenv("DATA_PATH", config.data_path)
     config.save_model_path = os.getenv("SAVE_MODEL_PATH", config.save_model_path)
