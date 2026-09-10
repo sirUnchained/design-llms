@@ -113,7 +113,10 @@ def model_info(model, cfg):
     summary(model)
 
 
-def generate(model, cfg: GPT_configs, prompt: str, seed=None):
+def generate(model, cfg: GPT_configs, prompt: str, seed=42):
+    if seed is not None:
+        torch.manual_seed(seed=seed)
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)
     model.to(device=device)
