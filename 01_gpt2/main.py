@@ -164,6 +164,7 @@ def train(model: GPT_model, cfg: GPT_configs):
         end_frac=1.0,
     )
 
+    print("=" * 100)
     print(
         f"We are going to train model {cfg.epochs} Epochs. "
         f"Our batch size is {cfg.batch_size}. "
@@ -171,6 +172,7 @@ def train(model: GPT_model, cfg: GPT_configs):
         f"We have {len(val_loader)} validation samples. "
         f"The model will be trained in {len(train_loader) * cfg.epochs} steps. "
     )
+    print("=" * 100)
 
     # ==== SETUP EPOCHS DEVICE AND OPTIMIZER ====
     device = "cuda" if torch.cuda.is_available() else "cpu"
