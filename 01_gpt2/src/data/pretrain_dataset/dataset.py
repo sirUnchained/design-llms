@@ -13,21 +13,16 @@ class MemmapGPTDataset(Dataset):
     """
     ## Memory-Mapped GPT Dataset Class
 
-    This class makes your pre-tokenized binary corpus ready for the model to
-    learn on it, without ever loading the full token sequence into RAM.
+    This class makes your pre-tokenized binary corpus ready for the model to learn on it, without ever loading the full token sequence into RAM.
 
-    Unlike a dataset that tokenizes raw text up front and pre-materializes
-    every training chunk as a tensor, this class reads token ids lazily from
-    a `uint16` binary file on disk using `numpy.memmap`. Only the slice of
-    tokens needed for the requested chunk is paged into memory, so RAM usage
+    Unlike a dataset that tokenizes raw text up front and pre-materializes every training chunk as a tensor, this class reads token ids lazily from
+    a `uint16` binary file on disk using `numpy.memmap`. Only the slice of tokens needed for the requested chunk is paged into memory, so RAM usage
     stays flat no matter how large the underlying dataset is.
 
-    A `[start_idx, end_idx)` token range can be given so a single binary
-    file can be shared between a train split and a val split without
+    A `[start_idx, end_idx)` token range can be given so a single binary file can be shared between a train split and a val split without
     duplicating it on disk.
 
-    The memmap handle is opened lazily inside `__getitem__` (not `__init__`)
-    so that each DataLoader worker process opens its own file handle, which
+    The memmap handle is opened lazily inside `__getitem__` (not `__init__`) so that each DataLoader worker process opens its own file handle, which
     is required for correctness when `num_workers > 0`.
 
     ---
@@ -71,10 +66,8 @@ class MemmapGPTDataset(Dataset):
         """
         ## Lazily open the memmap handle for the current process.
 
-        Ensures each DataLoader worker process (when `num_workers > 0`) opens
-        its own independent memmap handle rather than sharing one created in
-        the main process, which numpy's memmap does not support safely across
-        forked/spawned workers.
+        Ensures each DataLoader worker process (when `num_workers > 0`) opens its own independent memmap handle rather than sharing one created in
+        the main process, which numpy's memmap does not support safely across forked/spawned workers.
 
         ---
 
@@ -94,10 +87,8 @@ class MemmapGPTDataset(Dataset):
         """
         ## Fetch one (input, target) chunk pair by index.
 
-        Reads a single window of `context_length + 1` tokens starting at
-        `start_idx + idx * stride` from the memmap, then splits it into an
-        input chunk (all but the last token) and a target chunk (all but
-        the first token) — the standard next-token-prediction shift.
+        Reads a single window of `context_length + 1` tokens starting at `start_idx + idx * stride` from the memmap, then splits it into an
+        input chunk (all but the last token) and a target chunk (all but the first token) — the standard next-token-prediction shift.
 
         ---
 
@@ -121,8 +112,7 @@ def get_bin_path(data_path: str, tokenizer_name: str) -> str:
     """
     ## Derive the tokenized binary path for a given raw data path.
 
-    Keeps the tokenized cache next to the source corpus, same name, `.bin`
-    extension. So `./data/llm_dataset.jsonl` maps to
+    Keeps the tokenized cache next to the source corpus, same name, `.bin` extension. So `./data/llm_dataset.jsonl` maps to
     `./data/llm_dataset_{tokenizer_name}_tokenizer.bin`.
 
     ---
@@ -142,12 +132,9 @@ def ensure_bin_dataset(cfg: GPT_configs) -> str:
     """
     ## Verify a tokenized binary exists for the configured dataset.
 
-    Tokenization is no longer something training does for you -- it now
-    lives entirely in `data/prepare_data.py`, run once as a separate,
-    offline data-prep step (scrape -> filter -> tokenize) before you ever
-    start `main.py -t`. This function just checks that the expected `.bin`
-    file (see `get_bin_path`) is present, and raises immediately with clear
-    next steps if it isn't, rather than silently tokenizing mid-training run.
+    Tokenization is no longer something training does for you -- it now lives entirely in `data/prepare_data.py`, run once as a separate,
+    offline data-prep step (scrape -> filter -> tokenize) before you ever start `main.py -t`. This function just checks that the expected `.bin`
+    file (see `get_bin_path`) is present, and raises immediately with clear next steps if it isn't, rather than silently tokenizing mid-training run.
 
     ---
 
@@ -190,12 +177,10 @@ def create_dataloader(
     """
     ## Dataloader Creator
 
-    This function will create a pytorch dataloader backed by `MemmapGPTDataset`,
-    which is essential for training on datasets too large to tokenize and hold
+    This function will create a pytorch dataloader backed by `MemmapGPTDataset`, which is essential for training on datasets too large to tokenize and hold
     in RAM all at once.
 
-    `start_frac`/`end_frac` let you carve a train/val split (or any subset)
-    out of a single tokenized `.bin` file by token position, so you don't need
+    `start_frac`/`end_frac` let you carve a train/val split (or any subset) out of a single tokenized `.bin` file by token position, so you don't need
     to tokenize or store separate files per split.
 
     ---

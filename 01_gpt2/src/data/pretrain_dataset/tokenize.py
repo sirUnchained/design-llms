@@ -9,8 +9,7 @@ def _iter_text_chunks(src_path, chunk_chars):
     """
     ## Yield bounded-size text chunks from a corpus file.
 
-    Used by `tokenize_to_bin` so only one chunk of raw text is held in
-    memory at a time, regardless of total corpus size.
+    Used by `tokenize_to_bin` so only one chunk of raw text is held in memory at a time, regardless of total corpus size.
 
     ---
 
@@ -50,23 +49,17 @@ def tokenize_to_bin(src_path, out_path, tokenizer_name="gpt2", chunk_chars=50_00
     """
     ## Tokenize a large text/JSONL corpus into a binary token file, in a single pass.
 
-    Reads the corpus in bounded-size chunks, encodes each chunk with
-    tiktoken, and appends the resulting `uint16` token ids straight onto the
-    end of `out_path` as raw bytes. There's no need to know the total token
-    count up front: a plain file handle in append-binary mode grows on disk
-    as we write, so peak RAM stays bounded by `chunk_chars` regardless of
-    corpus size, and the corpus is only tokenized once.
+    Reads the corpus in bounded-size chunks, encodes each chunk with tiktoken, and appends the resulting `uint16` token ids straight onto the
+    end of `out_path` as raw bytes. There's no need to know the total token count up front: a plain file handle in append-binary mode grows on disk
+    as we write, so peak RAM stays bounded by `chunk_chars` regardless of corpus size, and the corpus is only tokenized once.
 
-    The resulting file has the same on-disk layout a `numpy.memmap` of
-    dtype `uint16` would produce, so it can still be opened for reading with
+    The resulting file has the same on-disk layout a `numpy.memmap` of dtype `uint16` would produce, so it can still be opened for reading with
     `np.memmap(out_path, dtype=np.uint16, mode="r")` (see `MemmapGPTDataset`).
 
-    `uint16` is safe for the GPT-2 tokenizer since `vocab_size` (50257) fits
-    under 65536, and it halves storage compared to `int64`.
+    `uint16` is safe for the GPT-2 tokenizer since `vocab_size` (50257) fits under 65536, and it halves storage compared to `int64`.
 
-    This is meant to be run once as a preprocessing step, not during training.
-    See `prepare_bin_dataset` in `src/data/dataset.py` for the cached wrapper
-    that calls this automatically when needed.
+    This is meant to be run once as a preprocessing step, not during training. See `prepare_bin_dataset` in `src/data/dataset.py` for the
+    cached wrapper that calls this automatically when needed.
 
     ---
 

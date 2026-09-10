@@ -50,16 +50,25 @@ DEFAULT_CRAWL_DELAY = 1.0  # seconds, used when robots.txt gives no crawl-delay
 COUNT_TOKENS = False
 
 # -------------------------------------------------------------------
-# Tokenization (post-scrape)
+# Language filtering
 # -------------------------------------------------------------------
-# After scraping finishes, the resulting JSONL is tokenized straight to a
-# uint16 binary file next to it -- this is now the ONLY place tokenization
-# happens. Training (main.py / src/training/train.py) never tokenizes; it
-# just expects this .bin to already exist and fails fast with instructions
-# if it doesn't. Run this script once whenever your dataset changes.
-TOKENIZE_TO_BIN = True
-TOKENIZE_CHUNK_CHARS = 50_000_000  # ~50MB of text per chunk while tokenizing
-TOKENIZE_RESUME = True  # resume from a crashed/interrupted tokenization run
+# ISO 639-1 codes this pipeline is allowed to scrape. Only English is
+# supported right now -- add more codes here as/when downstream tokenizer
+# and training assumptions actually support them (mixing in unreviewed
+# languages silently skews the dataset).
+SUPPORTED_LANGUAGES = {"en"}
+
+FILTER_BY_LANGUAGE = True
+
+# Content-based language detection (via the optional `langdetect` package)
+# is only used as a fallback when a page doesn't declare its language in
+# markup (no <html lang="">, no content-language meta, no og:locale). It's
+# a heuristic guess from a text sample, not a certainty, but it's the only
+# option for the (very common) pages that simply omit the declaration.
+ALLOW_CONTENT_LANGUAGE_DETECTION = True
+_LANGDETECT_WARNED = (
+    False  # module-level flag so the missing-dependency notice prints once
+)
 
 # License allowlist (URLs and keywords).
 #
@@ -121,6 +130,18 @@ ALLOW_HEURISTIC_LICENSE = False
 RESPECT_AI_OPT_OUT = True
 AI_OPT_OUT_TOKENS = {"noai", "noimageai", "noindex"}
 
+# -------------------------------------------------------------------
+# Tokenization (post-scrape)
+# -------------------------------------------------------------------
+# After scraping finishes, the resulting JSONL is tokenized straight to a
+# uint16 binary file next to it -- this is now the ONLY place tokenization
+# happens. Training (main.py / src/training/train.py) never tokenizes; it
+# just expects this .bin to already exist and fails fast with instructions
+# if it doesn't. Run this script once whenever your dataset changes.
+TOKENIZE_TO_BIN = True
+TOKENIZE_CHUNK_CHARS = 50_000_000  # ~50MB of text per chunk while tokenizing
+TOKENIZE_RESUME = True  # resume from a crashed/interrupted tokenization run
+
 
 # -------------------------------------------------------------------
 # robots.txt handling (via stdlib robotparser -- correctly handles
@@ -180,6 +201,101 @@ class DomainThrottle:
 
 
 domain_throttle = DomainThrottle()
+
+
+# -------------------------------------------------------------------
+# Language detection
+# -------------------------------------------------------------------
+def normalize_lang_code(code: Optional[str]) -> Optional[str]:
+    """ "en-US" / "en_GB" / "EN" -> "en". Keeps just the primary subtag,
+    lowercased, since SUPPORTED_LANGUAGES is a set of ISO 639-1 codes and
+    markup/detectors report regional variants inconsistently."""
+    if not code:
+        return None
+    code = code.strip().lower().replace("_", "-")
+    if not code:
+        return None
+    primary = code.split("-")[0]
+    return primary or None
+
+
+def detect_language_from_markup(soup: BeautifulSoup) -> Tuple[Optional[str], str]:
+    """Cheap, no-dependency language check using whatever the page itself
+    declares. Returns (lang_code, method); method explains where the code
+    came from so it can be logged/stored. Doesn't touch page text, so it's
+    safe to call before spending time on text extraction."""
+
+    html_tag = soup.find("html")
+    if html_tag and html_tag.get("lang"):
+        code = normalize_lang_code(html_tag["lang"])
+        if code:
+            return code, "html_lang_attr"
+
+    meta = soup.find(
+        "meta",
+        attrs={"http-equiv": lambda v: bool(v) and v.lower() == "content-language"},
+    )
+    if meta and meta.get("content"):
+        code = normalize_lang_code(meta["content"])
+        if code:
+            return code, "meta_content_language"
+
+    meta = soup.find("meta", attrs={"name": "language"})
+    if meta and meta.get("content"):
+        code = normalize_lang_code(meta["content"])
+        if code:
+            return code, "meta_name_language"
+
+    meta = soup.find("meta", attrs={"property": "og:locale"})
+    if meta and meta.get("content"):
+        code = normalize_lang_code(meta["content"])
+        if code:
+            return code, "og_locale"
+
+    return None, "undeclared"
+
+
+def detect_language_from_text(text: str) -> Tuple[Optional[str], str]:
+    """Fallback for pages that don't declare a language anywhere in markup.
+    Uses the optional `langdetect` package against a text sample. Returns
+    (None, "detection_unavailable") if the package isn't installed or
+    detection fails/is inconclusive, rather than raising -- an unsupported
+    dependency shouldn't crash the crawl, it should just make the language
+    filter conservative (unknown language -> skipped, same as an explicit
+    unsupported one)."""
+    global _LANGDETECT_WARNED
+
+    if not ALLOW_CONTENT_LANGUAGE_DETECTION or not text or len(text) < 50:
+        return None, "undeclared"
+
+    try:
+        from langdetect import detect, LangDetectException, DetectorFactory
+
+        DetectorFactory.seed = 0  # deterministic results across runs
+    except ImportError:
+        if not _LANGDETECT_WARNED:
+            print(
+                "⚠️ 'langdetect' isn't installed, so pages without an explicit "
+                "language declaration can't be checked and will be skipped. "
+                "Run `pip install langdetect` to enable content-based detection.",
+                flush=True,
+            )
+            _LANGDETECT_WARNED = True
+        return None, "detection_unavailable"
+
+    try:
+        code = detect(text[:2000])
+        return normalize_lang_code(code), "content_detected"
+    except LangDetectException:
+        return None, "detection_inconclusive"
+
+
+def is_language_supported(lang_code: Optional[str]) -> bool:
+    if not FILTER_BY_LANGUAGE:
+        return True
+    if not lang_code:
+        return False
+    return lang_code in SUPPORTED_LANGUAGES
 
 
 # -------------------------------------------------------------------
@@ -391,6 +507,17 @@ async def scrape_one(
 
                     soup = BeautifulSoup(html, "html.parser")
 
+                    # Language gate, part 1: check declared markup first since
+                    # it's essentially free and lets us bail out before doing
+                    # any of the heavier license/opt-out/extraction work below.
+                    lang_code, lang_method = detect_language_from_markup(soup)
+                    if lang_code and not is_language_supported(lang_code):
+                        vlog(
+                            f"🌐 {url} – unsupported language '{lang_code}' "
+                            f"(via {lang_method}; supported: {sorted(SUPPORTED_LANGUAGES)})"
+                        )
+                        return False
+
                     if has_ai_opt_out(soup, resp.headers):
                         vlog(f"🚫 {url} – AI/indexing opt-out signal present")
                         return False
@@ -407,6 +534,21 @@ async def scrape_one(
                         vlog(f"📭 {url} – no text extracted")
                         return False
 
+                    # Language gate, part 2: markup didn't declare a language
+                    # (or FILTER_BY_LANGUAGE let an unknown one through this
+                    # far) -- fall back to detecting it from the extracted
+                    # text itself now that we have it.
+                    if lang_method == "undeclared":
+                        lang_code, lang_method = detect_language_from_text(text)
+
+                    if not is_language_supported(lang_code):
+                        vlog(
+                            f"🌐 {url} – unsupported/undetected language "
+                            f"'{lang_code}' (via {lang_method}; "
+                            f"supported: {sorted(SUPPORTED_LANGUAGES)})"
+                        )
+                        return False
+
                     h = content_hash(text)
                     async with hashes_lock:
                         if h in seen_hashes:
@@ -416,6 +558,8 @@ async def scrape_one(
 
                     record = {
                         "url": url,
+                        "language": lang_code,
+                        "language_detection_method": lang_method,
                         "license": lic,
                         "license_verified": verified,
                         "fetched_at": time.strftime(
@@ -431,7 +575,8 @@ async def scrape_one(
                         append_jsonl(output_file, record)
 
                     vlog(
-                        f"✅ {url} – {len(text)} chars, license: {lic} (verified={verified})"
+                        f"✅ {url} – {len(text)} chars, lang: {lang_code} "
+                        f"(via {lang_method}), license: {lic} (verified={verified})"
                     )
                     return True
 
@@ -493,10 +638,15 @@ async def scrape_urls(urls: List[str], output_file: str):
     to_fetch = [u for u in unique if u not in existing_urls]
     skipped = len(unique) - len(to_fetch)
 
+    lang_note = (
+        f"languages allowed: {sorted(SUPPORTED_LANGUAGES)}"
+        if FILTER_BY_LANGUAGE
+        else "language filter disabled"
+    )
     print(
         f"📋 {len(unique)} unique URLs ({skipped} already in '{output_file}', "
         f"{len(to_fetch)} to fetch; max concurrency={MAX_CONCURRENT}, "
-        f"per-domain requests serialized to respect crawl-delay)",
+        f"per-domain requests serialized to respect crawl-delay; {lang_note})",
         flush=True,
     )
 

@@ -228,4 +228,5 @@ def plot_losses(epochs_seen, tokens_seen, train_losses, val_losses):
     fig.savefig("train-val-loss.png")
 
 
-main()
+if __name__ == "__main__":
+    main()
