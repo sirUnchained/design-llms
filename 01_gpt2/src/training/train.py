@@ -46,6 +46,7 @@ def train_model(
 
     Args:
         model (torch.nn.Module): The language model to be trained.
+        train_loader_fn (function): A dynamic function which creates train dataloader for us.
         train_dataloader (DataLoader): DataLoader yielding training batches.
         val_dataloader (DataLoader): DataLoader yielding validation batches.
         num_epochs (int): Number of complete passes over the training data.
@@ -74,7 +75,7 @@ def train_model(
     tokens_seen, global_step = 0, -1
     total_steps = len(train_dataloader) * num_epochs
     start_epoch = 0
-    start_index = 20000
+    start_index = 34000
 
     latest_ckpt_path = os.path.join(checkpoint_path, "latest.pt")
     os.makedirs("./training-process", exist_ok=True)
