@@ -103,10 +103,14 @@ def train_model(
         # We refresh dataloader after every epoch by adding epoch number with seed
         this_start_index = start_index if epoch == start_epoch else 0
         train_dataloader = train_loader_fn(epoch, this_start_index)
+        print("=" * 100)
+        print(f"the starting index is now {this_start_index} ")
+        print(f"total remain steps is {len(train_dataloader) * epochs} ")
+        print("=" * 100)
 
         if total_steps is None:
-            # approx: assumes similar length across epochs (true here since
-            # start_index only shrinks the *first* resumed epoch)
+            # we load a sample dataloader and getting smaples count.
+            # So by multiply it to epochs we have total steps count.
             full_loader = train_loader_fn(epoch, 0)
             total_steps = len(full_loader) * num_epochs
 
