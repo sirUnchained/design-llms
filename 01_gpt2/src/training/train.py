@@ -89,7 +89,7 @@ def train_model(
         train_losses = checkpoint["train_losses"]
         val_losses = checkpoint["val_losses"]
         track_tokens_seen = checkpoint["track_tokens_seen"]
-        # start_index = checkpoint.get("start_index", start_index)
+        start_index = checkpoint.get("start_index", start_index)
         total_steps = checkpoint.get("total_steps", total_steps)
     elif use_checkpoints:
         print(
