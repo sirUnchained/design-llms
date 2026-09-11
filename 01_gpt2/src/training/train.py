@@ -16,6 +16,7 @@ from src.utils.ckeckpoints import load_checkpoint, save_checkpoint
 
 def train_model(
     model,
+    train_loader_fn,
     train_dataloader: torch.utils.data.DataLoader,
     val_dataloader: torch.utils.data.DataLoader,
     num_epochs: int,
@@ -51,17 +52,13 @@ def train_model(
         optimizer (torch.optim.Optimizer): Optimizer used for gradient-based updates.
         device (torch.device): Device (CPU or CUDA) on which to perform computations.
         eval_freq (int): Evaluate the model every N global steps.
-        eval_iter (int): Placeholder for the number of batches to use during
-                         evaluation. Currently, `evaluate_model` ignores this value.
+        eval_iter (int): Placeholder for the number of batches to use during evaluation. Currently, `evaluate_model` ignores this value.
         start_context (str): Initial text prompt used for sample generation after each epoch.
         tokenizer: Tokenizer instance for converting text to token IDs and vice versa.
         checkpoint_path (str): Directory where checkpoint files are read from and written to.
-        checkpoint_freq (int, optional): If `create_checkpoints` is True, save a checkpoint
-                                         every N global steps. Defaults to 1000.
-        use_checkpoints (bool, optional): If True, attempt to resume training from
-                                          `{checkpoint_path}/latest.pt`. Defaults to False.
-        create_checkpoints (bool, optional): If True, save periodic and end-of-epoch
-                                              checkpoints to `checkpoint_path`. Defaults to False.
+        checkpoint_freq (int, optional): If `create_checkpoints` is True, save a checkpoint every N global steps. Defaults to 1000.
+        use_checkpoints (bool, optional): If True, attempt to resume training from`{checkpoint_path}/latest.pt`. Defaults to False.
+        create_checkpoints (bool, optional): If True, save periodic and end-of-epoch checkpoints to `checkpoint_path`. Defaults to False.
 
     Returns:
         tuple: A 3-element tuple containing:
@@ -77,6 +74,7 @@ def train_model(
     tokens_seen, global_step = 0, -1
     total_steps = len(train_dataloader) * num_epochs
     start_epoch = 0
+    start_index = 10000
 
     latest_ckpt_path = os.path.join(checkpoint_path, "latest.pt")
     os.makedirs("./training-process", exist_ok=True)
@@ -90,14 +88,29 @@ def train_model(
         train_losses = checkpoint["train_losses"]
         val_losses = checkpoint["val_losses"]
         track_tokens_seen = checkpoint["track_tokens_seen"]
+        start_index = checkpoint.get("start_index", start_index)
         total_steps = checkpoint.get("total_steps", total_steps)
     elif use_checkpoints:
         print(
             f"`use_checkpoints` is true but no checkpoint found at {latest_ckpt_path}, starting fresh."
         )
 
+    total_steps = None
+
     for epoch in range(start_epoch, num_epochs):
         model.train()
+
+        # We refresh dataloader after every epoch by adding epoch number with seed
+        this_start_index = start_index if epoch == start_epoch else 0
+        train_dataloader = train_loader_fn(epoch, this_start_index)
+
+        if total_steps is None:
+            # approx: assumes similar length across epochs (true here since
+            # start_index only shrinks the *first* resumed epoch)
+            full_loader = train_loader_fn(epoch, 0)
+            total_steps = len(full_loader) * num_epochs
+
+        samples_done_this_epoch = this_start_index
 
         for step, (input_batch, target_batch) in enumerate(train_dataloader):
             optimizer.zero_grad()
@@ -172,6 +185,7 @@ def train_model(
                     model,
                     optimizer,
                     epoch,
+                    samples_done_this_epoch,
                     global_step,
                     tokens_seen,
                     train_losses,
@@ -190,6 +204,7 @@ def train_model(
                 model,
                 optimizer,
                 epoch + 1,
+                0,
                 global_step,
                 tokens_seen,
                 train_losses,
@@ -203,6 +218,7 @@ def train_model(
                 model,
                 optimizer,
                 epoch + 1,
+                0,
                 global_step,
                 tokens_seen,
                 train_losses,
@@ -335,6 +351,22 @@ if __name__ == "__main__":
     bin_path = ensure_bin_dataset(cfg)
     train_ratio = 0.80
 
+    def train_loader_fn(epoch, start_index):
+        return create_dataloader(
+            bin_path,
+            start_frac=0.0,
+            end_frac=train_ratio,
+            batch_size=cfg.batch_size,
+            max_length=cfg.context_length,
+            stride=cfg.context_length,
+            drop_last=True,
+            shuffle=True,
+            num_workers=4,
+            seed=cfg.seed,
+            epoch=epoch,
+            start_index=start_index,
+        )
+
     tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)
     train_loader = create_dataloader(
         bin_path,
@@ -363,6 +395,7 @@ if __name__ == "__main__":
 
     train_losses, val_losses, tokens_seen = train_model(
         model,
+        train_loader_fn,
         train_loader,
         val_loader,
         epochs,

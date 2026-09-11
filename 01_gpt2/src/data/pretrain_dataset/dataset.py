@@ -7,6 +7,7 @@ import numpy as np
 
 from configs.model_configs import GPT_configs
 from src.data.pretrain_dataset.tokenize import tokenize_to_bin
+from src.data.pretrain_dataset.sampler import ResumableRandomSampler
 
 
 class MemmapGPTDataset(Dataset):
@@ -28,19 +29,11 @@ class MemmapGPTDataset(Dataset):
     ---
 
     Args:
-        bin_path (str):
-            Path to the binary file of `uint16` token ids.
-        context_length (int):
-            Maximum sequence length (number of tokens per sample).
-        stride (int):
-            Stride per sample, in tokens. Use `stride == context_length` for
-            non-overlapping chunks.
-        start_idx (int, optional):
-            First token index (inclusive) this dataset is allowed to read
-            from. Default is 0.
-        end_idx (int, optional):
-            Last token index (exclusive) this dataset is allowed to read up
-            to. Default is `None`, meaning the end of the file.
+        bin_path (str): Path to the binary file of `uint16` token ids.
+        context_length (int): Maximum sequence length (number of tokens per sample).
+        stride (int): Stride per sample, in tokens. Use `stride == context_length` for non-overlapping chunks.
+        start_idx (int, optional): First token index (inclusive) this dataset is allowed to read from. Default is 0.
+        end_idx (int, optional): Last token index (exclusive) this dataset is allowed to read up to. Default is `None`, meaning the end of the file.
     """
 
     def __init__(
@@ -93,12 +86,10 @@ class MemmapGPTDataset(Dataset):
         ---
 
         Args:
-            idx (int): Index of the sample to fetch, relative to this
-                      dataset's `[start_idx, end_idx)` range.
+            idx (int): Index of the sample to fetch, relative to this dataset's `[start_idx, end_idx)` range.
 
         Returns:
-            tuple[torch.Tensor, torch.Tensor]: `(input_ids, target_ids)`,
-                each of shape `(context_length,)` and dtype `int64`.
+            tuple[torch.Tensor, torch.Tensor]: `(input_ids, target_ids)`, each of shape `(context_length,)` and dtype `int64`.
         """
         self._ensure_open()
         start = self.start_idx + idx * self.stride
@@ -139,8 +130,7 @@ def ensure_bin_dataset(cfg: GPT_configs) -> str:
     ---
 
     Args:
-        cfg (GPT_configs): Your GPT config class. Uses `cfg.data_path` to
-                           derive the expected `.bin` path.
+        cfg (GPT_configs): Your GPT config class. Uses `cfg.data_path` to derive the expected `.bin` path.
 
     Returns:
         str: Path to the ready-to-use tokenized `.bin` file.
@@ -173,6 +163,9 @@ def create_dataloader(
     pin_memory=True,
     start_frac=0.0,
     end_frac=1.0,
+    seed=None,
+    epoch=0,
+    start_index=0,
 ):
     """
     ## Dataloader Creator
@@ -199,21 +192,24 @@ def create_dataloader(
         drop_last (bool):
             This will drop last batch if it is shorter than the specified `batch_size`.
         num_workers (int):
-            How many subprocesses to use for data loading. Safe to set > 0
-            here since each worker opens its own memmap handle.
+            How many subprocesses to use for data loading. Safe to set > 0 here since each worker opens its own memmap handle.
         pin_memory (bool):
-            If True, copies tensors into pinned memory before returning them,
-            which speeds up the host-to-GPU transfer. Default is True.
+            If True, copies tensors into pinned memory before returning them, which speeds up the host-to-GPU transfer. Default is True.
         start_frac (float, optional):
-            Fraction (0.0-1.0) of the token stream where this dataloader's
-            range begins. Default is 0.0.
+            Fraction (0.0-1.0) of the token stream where this dataloader's range begins. Default is 0.0.
         end_frac (float, optional):
-            Fraction (0.0-1.0) of the token stream where this dataloader's
-            range ends. Default is 1.0.
+            Fraction (0.0-1.0) of the token stream where this dataloader's range ends. Default is 1.0.
+        seed (int):
+            The seed for shuffling dataset, default it None.
+        epoch (int):
+            Current epoch number.
+        start_index (int):
+            How many samples into this epoch's permutation to start from. 0 for a fresh epoch
 
     Returns:
         torch.utils.data.Dataloader: Our needed dataloader
     """
+
     data = np.memmap(bin_path, dtype=np.uint16, mode="r")
     n_tokens = data.shape[0]
 
@@ -228,6 +224,13 @@ def create_dataloader(
         end_idx=end_idx,
     )
 
+    sampler = None
+    if shuffle and seed is not None:
+        sampler = ResumableRandomSampler(
+            dataset, seed=seed, epoch=epoch, start_index=start_index
+        )
+        shuffle = False  # Using sampler we no more need to shuffle dataloader, sampler will do it
+
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -236,6 +239,7 @@ def create_dataloader(
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
+        sampler=sampler,
     )
 
     return dataloader

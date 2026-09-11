@@ -65,6 +65,7 @@ def save_checkpoint(
     val_losses,
     track_tokens_seen,
     total_steps,
+    start_index,
 ):
     """Save everything needed to exactly resume training, and mirror it to the
     `check-points` folder of the configured Hugging Face repo (`REPO_ID`).
@@ -84,6 +85,7 @@ def save_checkpoint(
             "val_losses": val_losses,
             "track_tokens_seen": track_tokens_seen,
             "total_steps": total_steps,
+            "start_index": start_index,
         },
         path,
     )

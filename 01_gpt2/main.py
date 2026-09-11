@@ -182,8 +182,25 @@ def train(model: GPT_model, cfg: GPT_configs):
     optim = torch.optim.AdamW(params=model.parameters(), lr=4e-4, weight_decay=0.1)
 
     # ==== TRAIN MODEL ====
+    def train_loader_fn(epoch, start_index):
+        return create_dataloader(
+            bin_path,
+            start_frac=0.0,
+            end_frac=train_ratio,
+            batch_size=cfg.batch_size,
+            max_length=cfg.context_length,
+            stride=cfg.context_length,
+            drop_last=True,
+            shuffle=True,
+            num_workers=4,
+            seed=cfg.seed,
+            epoch=epoch,
+            start_index=start_index,
+        )
+
     train_losses, val_losses, tokens_seen = train_model(
         model,
+        train_loader_fn,
         train_loader,
         val_loader,
         cfg.epochs,
