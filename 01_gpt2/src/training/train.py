@@ -105,7 +105,7 @@ def train_model(
         train_dataloader = train_loader_fn(epoch, this_start_index)
         print("=" * 100)
         print(f"the starting index is now {this_start_index} ")
-        print(f"total remain steps is {len(train_dataloader) * epochs} ")
+        print(f"total remain steps is {len(train_dataloader) * num_epochs} ")
         print("=" * 100)
 
         if total_steps is None:
