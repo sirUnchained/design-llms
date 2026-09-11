@@ -89,7 +89,7 @@ def train_model(
         train_losses = checkpoint["train_losses"]
         val_losses = checkpoint["val_losses"]
         track_tokens_seen = checkpoint["track_tokens_seen"]
-        start_index = checkpoint.get("start_index", start_index)
+        # start_index = checkpoint.get("start_index", start_index)
         total_steps = checkpoint.get("total_steps", total_steps)
     elif use_checkpoints:
         print(
@@ -186,17 +186,17 @@ def train_model(
                 and global_step > 0
             ):
                 save_checkpoint(
-                    latest_ckpt_path,
-                    model,
-                    optimizer,
-                    epoch,
-                    samples_done_this_epoch,
-                    global_step,
-                    tokens_seen,
-                    train_losses,
-                    val_losses,
-                    track_tokens_seen,
-                    total_steps,
+                    path=latest_ckpt_path,
+                    model=model,
+                    optimizer=optimizer,
+                    epoch=epoch,
+                    global_step=global_step,
+                    tokens_seen=tokens_seen,
+                    train_losses=train_losses,
+                    val_losses=val_losses,
+                    track_tokens_seen=track_tokens_seen,
+                    total_steps=total_steps,
+                    start_index=samples_done_this_epoch,
                 )
 
         generate_and_print_sample(model, tokenizer, device, start_context)
@@ -205,31 +205,31 @@ def train_model(
         if create_checkpoints:
             epoch_ckpt_path = os.path.join(checkpoint_path, f"epoch_{epoch+1}.pt")
             save_checkpoint(
-                epoch_ckpt_path,
-                model,
-                optimizer,
-                epoch + 1,
-                0,
-                global_step,
-                tokens_seen,
-                train_losses,
-                val_losses,
-                track_tokens_seen,
-                total_steps,
+                path=epoch_ckpt_path,
+                model=model,
+                optimizer=optimizer,
+                epoch=epoch + 1,
+                global_step=global_step,
+                tokens_seen=tokens_seen,
+                train_losses=train_losses,
+                val_losses=val_losses,
+                track_tokens_seen=track_tokens_seen,
+                total_steps=total_steps,
+                start_index=0,
             )
             # also update "latest" so resuming picks up here
             save_checkpoint(
-                latest_ckpt_path,
-                model,
-                optimizer,
-                epoch + 1,
-                0,
-                global_step,
-                tokens_seen,
-                train_losses,
-                val_losses,
-                track_tokens_seen,
-                total_steps,
+                path=latest_ckpt_path,
+                model=model,
+                optimizer=optimizer,
+                epoch=epoch + 1,
+                start_index=0,
+                global_step=global_step,
+                tokens_seen=tokens_seen,
+                train_losses=train_losses,
+                val_losses=val_losses,
+                track_tokens_seen=track_tokens_seen,
+                total_steps=total_steps,
             )
 
     return train_losses, val_losses, track_tokens_seen
