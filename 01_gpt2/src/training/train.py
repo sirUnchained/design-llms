@@ -74,7 +74,7 @@ def train_model(
     tokens_seen, global_step = 0, -1
     total_steps = len(train_dataloader) * num_epochs
     start_epoch = 0
-    start_index = 10000
+    start_index = 20000
 
     latest_ckpt_path = os.path.join(checkpoint_path, "latest.pt")
     os.makedirs("./training-process", exist_ok=True)
