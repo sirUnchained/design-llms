@@ -1,6 +1,7 @@
 from pprint import pprint
 from pathlib import Path
 import json
+import random
 
 from scripts.evaluate import (
     generate_text_with_temperature_topk,
@@ -15,6 +16,7 @@ from src.utils.save_model_hf import save_model_hf, ensure_huggingface_login
 from src.utils.load_model import load_model_if_exists
 
 import torch
+import numpy
 import tiktoken
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -27,9 +29,14 @@ import sys
 def main():
     # --- Parse command-line args (simple, no argparse overhead) ---
     args = sys.argv[1:]  # Skip script name
+    cfg = get_gpt_configs()
+
+    if cfg.seed != 0:
+        torch.manual_seed(seed=cfg.seed)
+        numpy.random.seed(seed=cfg.seed)
+        random.seed(cfg.seed)
 
     print("Welcome to the gpt2 model pipeline! loading stuff please wait ...")
-    cfg = get_gpt_configs()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = GPT_model(cfg).to(device=device)
     print(f"Current device is {device}.")
@@ -39,7 +46,6 @@ def main():
 
     if "-t" in args:
         print("start train process ...")
-        torch.manual_seed(42)
         train(model, cfg)
         print("training process finished, Now you can use model.")
         return 0
@@ -52,7 +58,7 @@ def main():
             prompt = input("Enter your prompt: ")
 
         if load_model_if_exists(cfg, model, device):
-            generate(model, cfg, prompt, 42)
+            generate(model, cfg, prompt)
         else:
             print("Model not found, try to train it first.")
         return 0
@@ -74,7 +80,6 @@ def main():
 
         elif inp == "t":
             print("start train process ...")
-            torch.manual_seed(42)
             train(model, cfg)
             print("training process finished, Now you can use model.")
             return 0
@@ -82,7 +87,7 @@ def main():
         elif inp == "g":
             if load_model_if_exists(cfg, model, device):
                 prompt = input("Enter your prompt: ")
-                generate(model, cfg, prompt, 42)
+                generate(model, cfg, prompt)
                 return 0
             print("Model not found, try to train it first.")
 
@@ -113,10 +118,7 @@ def model_info(model, cfg):
     summary(model)
 
 
-def generate(model, cfg: GPT_configs, prompt: str, seed=42):
-    if seed is not None:
-        torch.manual_seed(seed=seed)
-
+def generate(model, cfg: GPT_configs, prompt: str):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)
     model.to(device=device)

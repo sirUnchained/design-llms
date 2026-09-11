@@ -15,6 +15,8 @@ class GPT_configs:
     drop_rate = 0.1
     qkv_bias = False
 
+    seed = 0
+
     lr_schedule_step = 0
 
     ticktoken_tokenizer = "gpt2"
@@ -48,8 +50,10 @@ def get_gpt_configs():
         "yes",
     )
 
+    config.seed = int(os.getenv("SEED", config.seed))
+
     config.lr_schedule_step = int(
-        os.getenv("LR_SCHEDULE_STEP", "0"), config.lr_schedule_step
+        os.getenv("LR_SCHEDULE_STEP", config.lr_schedule_step)
     )
 
     config.ticktoken_tokenizer = os.getenv("TOKENIZER", config.ticktoken_tokenizer)

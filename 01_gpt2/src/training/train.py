@@ -123,7 +123,6 @@ def train_model(
                 track_tokens_seen.append(tokens_seen)
 
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                # lr = optimizer.param_groups[0]["lr"]
                 if not torch.cuda.is_available():
                     allocated = 0.0
                     reserved = 0.0
@@ -155,7 +154,7 @@ def train_model(
                     f"Epoch {epoch+1:03d} (Step {global_step:08d}): "
                     f"Train {train_loss:.4f} | Val {val_loss:.4f} | "
                     f"PPL {calc_perplexity(train_loss):.2f}/{calc_perplexity(val_loss):.2f} | "
-                    f"LR {lr:.2e} | ",
+                    f"LR {lr:.6e} | ",
                     flush=True,
                 )
 
