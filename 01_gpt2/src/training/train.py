@@ -250,8 +250,7 @@ def evaluate_model(model, train_dataloader, val_dataloader, device, eval_iter):
         train_dataloader (DataLoader): DataLoader for the training dataset.
         val_dataloader (DataLoader): DataLoader for the validation dataset.
         device (torch.device): Device on which the tensors are allocated.
-        eval_iter (int): Number of batches to use for evaluation (currently unused,
-                         kept for compatibility with the training loop).
+        eval_iter (int): Number of batches to use for evaluation.
 
     Returns:
         tuple: (train_loss, val_loss) where each is a scalar tensor representing
