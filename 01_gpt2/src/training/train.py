@@ -125,6 +125,7 @@ def train_model(
 
             tokens_seen += input_batch.numel()
             global_step += 1
+            samples_done_this_epoch += input_batch.shape[0]
 
             lr = learning_rate_change(
                 global_step - lr_schedule_step, total_steps, 0.0, optimizer
