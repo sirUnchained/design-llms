@@ -128,7 +128,12 @@ def train_model(
             samples_done_this_epoch += input_batch.shape[0]
 
             lr = learning_rate_change(
-                global_step - lr_schedule_step, total_steps, 0.0, optimizer
+                global_step - lr_schedule_step,
+                total_steps,
+                0.0,
+                optimizer,
+                initial_lr=2e-4,
+                peak_lr=2e-4,
             )
 
             if global_step % eval_freq == 0:

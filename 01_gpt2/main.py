@@ -179,7 +179,7 @@ def train(model: GPT_model, cfg: GPT_configs):
     # ==== SETUP EPOCHS DEVICE AND OPTIMIZER ====
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device=device)
-    optim = torch.optim.AdamW(params=model.parameters(), lr=4e-4, weight_decay=0.1)
+    optim = torch.optim.AdamW(params=model.parameters(), lr=2e-4, weight_decay=0.1)
 
     # ==== TRAIN MODEL ====
     def train_loader_fn(epoch, start_index):
