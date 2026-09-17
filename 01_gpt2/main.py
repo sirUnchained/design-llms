@@ -206,7 +206,7 @@ def train(model: GPT_model, cfg: GPT_configs):
         cfg.epochs,
         optim,
         device,
-        eval_freq=5,
+        eval_freq=10,
         eval_iter=cfg.batch_size,
         lr_schedule_step=cfg.lr_schedule_step,
         start_context="Hello I am",
