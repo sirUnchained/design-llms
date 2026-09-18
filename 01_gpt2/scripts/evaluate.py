@@ -111,7 +111,7 @@ def generate_text_with_temperature_topk(
         logits = logits[:, -1, :]
 
         # apply top‑k filtering: keep only the k largest logits
-        if top_k is not None:
+        if top_k is not None and top_k != 0.0:
             top_logits, _ = torch.topk(logits, top_k)
             min_val = top_logits[:, -1]
             logits = torch.where(
