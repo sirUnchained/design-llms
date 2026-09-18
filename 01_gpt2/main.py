@@ -120,7 +120,8 @@ def model_info(model, cfg):
 
 def generate(model, cfg: GPT_configs, prompt: str):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    temperatures = [0.0, 0.5, 0.8]
+    temperatures = [0.0, 0.3, 0.7, 0.9]
+    top_ks = [0, 30, 70, 90]
 
     tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)
     user_input = text_to_token_ids(text=prompt, tokenizer=tokenizer).to(device=device)
@@ -128,17 +129,17 @@ def generate(model, cfg: GPT_configs, prompt: str):
     model.to(device=device)
     model.eval()
 
-    for t in temperatures:
+    for temp, top in zip(temperatures, top_ks):
         generated_ids = generate_text_with_temperature_topk(
             model=model,
             idx=user_input,
             context_size=cfg.context_length,
             max_new_tokens=128,
-            top_k=90,
-            temperature=t,
+            top_k=top,
+            temperature=temp,
         )
         print("=" * 100)
-        print(f"using temperature {t}:")
+        print(f"using temperature {temp} and top_k {top}:")
         print(token_ids_to_text(generated_ids, tokenizer))
         print("=" * 100)
 
