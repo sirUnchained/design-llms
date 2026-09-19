@@ -210,7 +210,7 @@ flowchart TD
 
 ## Sources
 
-I used [Build a Large Language Model (From Scratch)](https://www.oreilly.com/library/view/build-a-large/9781633437166/) + [Attention Is All You Need](https://arxiv.org/pdf/1706.03762) + [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) and the first part of [Hands-On Large Language Models: Language Understanding and Generation](https://www.oreilly.com/library/view/hands-on-large-language/9781098150952/) so I could understand deeply what is going on inside LLMs.
+I used [Build a Large Language Model (From Scratch)](https://www.oreilly.com/library/view/build-a-large/9781633437166/) + [Attention Is All You Need](https://arxiv.org/pdf/1706.03762) + [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) + [Using the Output Embedding to Improve Language Models](https://aclanthology.org/E17-2025.pdf) (before this article my model 38M parameter larger than gpt2 small) and the first part of [Hands-On Large Language Models: Language Understanding and Generation](https://www.oreilly.com/library/view/hands-on-large-language/9781098150952/) so I could understand deeply what is going on inside LLMs.
 
 ## License
 

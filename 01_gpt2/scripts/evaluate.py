@@ -76,7 +76,7 @@ def generate_text(model, idx, max_new_tokens, content_size):
 
 
 def generate_text_with_temperature_topk(
-    model, idx, max_new_tokens, context_size, temperature=0.0, top_k=None, eos_id=None
+    model, idx, max_new_tokens, context_size, temperature=0.0, top_k=0, eos_id=None
 ):
     """
     ## Generate new tokens using temperature scaling and optional top-k sampling.
@@ -95,7 +95,7 @@ def generate_text_with_temperature_topk(
         temperature (float, optional): Sampling temperature. Values > 0.0 enable
             probabilistic sampling. Default is 0.0 (greedy / argmax).
         top_k (int, optional): If provided, only the `top_k` tokens with the highest
-            logits are considered; others are masked to -inf. Default is None (no filtering).
+            logits are considered; others are masked to -inf. Default is 0 (no filtering).
         eos_id (int, optional): Token ID that marks the end of a sequence. If provided,
             generation stops when this token is produced. Default is None (no early stopping).
 
@@ -111,7 +111,7 @@ def generate_text_with_temperature_topk(
         logits = logits[:, -1, :]
 
         # apply top‑k filtering: keep only the k largest logits
-        if top_k is not None and top_k != 0.0:
+        if top_k > 0:
             top_logits, _ = torch.topk(logits, top_k)
             min_val = top_logits[:, -1]
             logits = torch.where(

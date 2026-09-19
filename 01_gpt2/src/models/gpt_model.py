@@ -11,7 +11,7 @@ class GPT_model(nn.Module):
     """
     ## A Generative Pre-trained Transformer (GPT) language model.
 
-    This implementation includes token and positional embeddings, dropout, a stack of transformer blocks, 
+    This implementation includes token and positional embeddings, dropout, a stack of transformer blocks,
     final layer normalization, and an output linear head that projects to vocabulary size.
 
     Args:
@@ -48,7 +48,7 @@ class GPT_model(nn.Module):
 
         # Important: Real GPT-2 ties the token embedding matrix (wte) and the output projection
         # (lm_head), they literally share the same weight tensor.
-        # So if you don't uncomment code below, your model will be larger than what it was in the main paper.
+        # So if you comment code below, your model will be larger than what it was in the main paper.
         self.out_head.weight = self.tok_emb.weight
 
     def forward(self, input_sequences: torch.Tensor) -> torch.Tensor:
