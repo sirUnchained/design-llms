@@ -8,6 +8,20 @@ from pydantic.dataclasses import dataclass
 
 
 class InstructionDataset(Dataset):
+    """
+    This class will get data in format of:
+
+    ```python
+    @dataclass
+    class instruct_dtype:
+        instruction: str
+        input: str
+        output: str
+    ```
+
+    then will format it into `alpaca` prompt format.
+    """
+
     def __init__(self, data, tokenizer) -> None:
         self.data = data
         self.encoded_texts = []
@@ -43,7 +57,7 @@ def custom_collate_draft(
     batch: list[list[int]],
     pad_token_id=50256,
     ignore_index=-100,  # why we chosed -100? because by default `torch.nn.CrossEntropyLoss` uses `-100` to ignore.
-    allowed_max_length=0,
+    allowed_max_length=1024,
     device="cpu",
 ):
     """
