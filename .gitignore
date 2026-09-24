@@ -1,10 +1,15 @@
 model-weights/*
 __pycache__
 .vscode
-fetch_gutenberg_links.py
 pretrain-result.txt
 urls-no-licence.txt
 urls
 llms-dataset
 random_restart_demo.py
 training-process
+
+prepare_instruct_data.py
+prepare_pretrain_data.py
+fetch_gutenberg_links.py
+
+*.jsonl

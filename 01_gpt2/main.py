@@ -120,8 +120,8 @@ def model_info(model, cfg):
 
 def generate(model, cfg: GPT_configs, prompt: str):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    temperatures = [0.0, 0.3, 0.7, 0.9]
-    top_ks = [0, 30, 70, 90]
+    temperatures = [0.0, 0.3, 0.7, 1.3, 1.6]
+    top_ks = [0, 30, 70, 90, 120]
 
     tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)
     user_input = text_to_token_ids(text=prompt, tokenizer=tokenizer).to(device=device)

@@ -43,10 +43,8 @@ def generate_text(model, idx, max_new_tokens, content_size):
     """
     ## Autoregressively generate new tokens given an initial sequence.
 
-    The function truncates the input context to the last `content_size` tokens,
-    then repeatedly feeds the model to obtain logits for the next token. The next token
-    is selected using greedy decoding (argmax of softmax probabilities). The generated
-    token is appended to the sequence, and the process repeats until `max_new_tokens`
+    The function truncates the input context to the last `content_size` tokens, then repeatedly feeds the model to obtain logits for the next token. The next token
+    is selected using greedy decoding (argmax of softmax probabilities). The generatedtoken is appended to the sequence, and the process repeats until `max_new_tokens`
     have been produced.
 
     Args:
