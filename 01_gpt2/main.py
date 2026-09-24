@@ -9,8 +9,15 @@ from scripts.evaluate import (
     token_ids_to_text,
 )
 from configs.model_configs import get_gpt_configs, GPT_configs
-from src.data.pretrain_dataset.dataset import create_dataloader, ensure_bin_dataset
-from src.training.train import train_model
+from src.data.pretrain_dataset.dataset import (
+    create_pretrain_dataloader,
+    ensure_bin_dataset,
+)
+from src.data.instruction_dataset.dataset import (
+    create_instruction_dataloaders,
+    get_dataset_train_val_test_path,
+)
+from src.training.pretrain import train_model
 from src.models.gpt_model import GPT_model
 from src.utils.save_model_hf import save_model_hf, ensure_huggingface_login
 from src.utils.load_model import load_model_if_exists
@@ -45,9 +52,9 @@ def main():
         ensure_huggingface_login(cfg=cfg)
 
     if "-t" in args:
-        print("start train process ...")
-        train(model, cfg)
-        print("training process finished, Now you can use model.")
+        print("start pre-train process ...")
+        pre_training(model, cfg)
+        print("pre-training process finished, Now you can use model.")
         return 0
 
     if "-g" in args:
@@ -79,9 +86,9 @@ def main():
             return 0
 
         elif inp == "t":
-            print("start train process ...")
-            train(model, cfg)
-            print("training process finished, Now you can use model.")
+            print("start pre-train process ...")
+            pre_training(model, cfg)
+            print("pre-training process finished, Now you can use model.")
             return 0
 
         elif inp == "g":
@@ -144,13 +151,13 @@ def generate(model, cfg: GPT_configs, prompt: str):
         print("=" * 100)
 
 
-def train(model: GPT_model, cfg: GPT_configs):
+def pre_training(model: GPT_model, cfg: GPT_configs):
     # ==== TOKENIZE ONCE (CACHED) AND BUILD TRAIN/VAL LOADERS FROM ONE BIN FILE ====
     bin_path = ensure_bin_dataset(cfg)
     train_ratio = 0.80
 
     tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)
-    train_loader = create_dataloader(
+    train_loader = create_pretrain_dataloader(
         bin_path,
         batch_size=cfg.batch_size,
         max_length=cfg.context_length,
@@ -161,7 +168,7 @@ def train(model: GPT_model, cfg: GPT_configs):
         start_frac=0.0,
         end_frac=train_ratio,
     )
-    val_loader = create_dataloader(
+    val_loader = create_pretrain_dataloader(
         bin_path,
         batch_size=cfg.batch_size,
         max_length=cfg.context_length,
@@ -190,7 +197,7 @@ def train(model: GPT_model, cfg: GPT_configs):
 
     # ==== TRAIN MODEL ====
     def train_loader_fn(epoch, start_index):
-        return create_dataloader(
+        return create_pretrain_dataloader(
             bin_path,
             start_frac=0.0,
             end_frac=train_ratio,
@@ -236,6 +243,36 @@ def train(model: GPT_model, cfg: GPT_configs):
 
     # ==== PLOT MODEL LOSSES ====
     plot_losses(cfg.epochs, tokens_seen, train_losses, val_losses)
+
+
+def instruction_training(model: GPT_model, cfg: GPT_configs):
+    dataset_path = get_dataset_train_val_test_path(cfg)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    train_loader, test_loader, val_loader = create_instruction_dataloaders(
+        dataset_path=dataset_path,
+        tokenizer_name=cfg.ticktoken_tokenizer,
+        batch_size=cfg.batch_size,
+        max_length=cfg.context_length,
+        device=device,
+        drop_last=True,
+        num_workers=5,
+    )
+
+    print("=" * 100)
+    print(
+        f"We are going to train model {cfg.epochs} Epochs. "
+        f"Our batch size is {cfg.batch_size}. "
+        f"We have {len(train_loader)} train samples. "
+        f"We have {len(val_loader)} validation samples. "
+        f"The model will be trained in {len(train_loader) * cfg.epochs} steps. "
+    )
+    print("=" * 100)
+
+    # ==== SETUP EPOCHS DEVICE AND OPTIMIZER ====
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device=device)
+    optim = torch.optim.AdamW(params=model.parameters(), lr=2e-4, weight_decay=0.1)
 
 
 def plot_losses(epochs_seen, tokens_seen, train_losses, val_losses):

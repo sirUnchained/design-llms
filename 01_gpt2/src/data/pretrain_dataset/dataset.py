@@ -152,8 +152,8 @@ def ensure_bin_dataset(cfg: GPT_configs) -> str:
     return bin_path
 
 
-def create_dataloader(
-    bin_path,
+def create_pretrain_dataloader(
+    bin_path: str,
     batch_size=4,
     max_length=256,
     stride=128,
@@ -180,7 +180,7 @@ def create_dataloader(
 
     Args:
         bin_path (str):
-            Path to the tokenized `.bin` file, as returned by `prepare_bin_dataset`.
+            Path to the tokenized `.bin` file.
         batch_size (int):
             The batch size.
         max_length (int):
@@ -257,7 +257,7 @@ if __name__ == "__main__":
 
         tokenize_to_bin(txt_path, bin_path)
 
-        dataloader = create_dataloader(
+        dataloader = create_pretrain_dataloader(
             bin_path,
             batch_size=2,
             max_length=3,

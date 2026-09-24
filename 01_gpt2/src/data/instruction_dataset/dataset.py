@@ -1,14 +1,19 @@
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import tiktoken
 
-from typing import Optional
+import os
 import json
 from pydantic.dataclasses import dataclass
+from functools import partial
+
+from configs.model_configs import GPT_configs
 
 
 class InstructionDataset(Dataset):
     """
+    ## Instruction dataset
+
     This class will get data in format of:
 
     ```python
@@ -58,9 +63,11 @@ def custom_collate_draft(
     pad_token_id=50256,
     ignore_index=-100,  # why we chosed -100? because by default `torch.nn.CrossEntropyLoss` uses `-100` to ignore.
     allowed_max_length=1024,
-    device="cpu",
+    device="cuda",
 ):
     """
+    ## Collate draft
+
     Collate variable-length token sequences into padded input and target tensors for causal language model training.
     Each sequence is appended with a padding/EOF token and padded to the maximum sequence length in the batch.
     The resulting sequence is then shifted by one position to create the input-target pair required for next-token prediction.
@@ -121,6 +128,147 @@ def custom_collate_draft(
     inputs_tensor = torch.stack(inputs_lst).to(device)
     targets_tensor = torch.stack(targets_lst).to(device)
     return inputs_tensor, targets_tensor
+
+
+def get_dataset_train_val_test_path(cfg: GPT_configs) -> str:
+    """
+    ## Derive the tokenized binary path for a given raw data path.
+
+    Keeps the tokenized cache next to the source corpus, same name, `.bin` extension. So `./data/llm_dataset.jsonl` maps to
+    `./data/llm_dataset_{tokenizer_name}_tokenizer.bin`.
+
+    ---
+
+    Args:
+        data_path (str): Path to the raw `.txt` or `.jsonl` corpus.
+
+    Returns:
+        str: Path to the corresponding `.bin` tokenized file.
+    """
+
+    root, _ = os.path.splitext(cfg.data_path)
+    path = root + "_instruct" + "jsonl"
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"No tokenized binary found at '{path}'.\n"
+            f"Tokenization now happens as a separate offline step, not during training.\n"
+            f"Run:  python data/prepare_data.py <urls.txt> {cfg.data_path}\n"
+            f"(this scrapes/filters your data AND writes '{path}')."
+        )
+
+    return path
+
+
+def create_instruction_dataloaders(
+    dataset_path: str,
+    tokenizer_name: str,
+    batch_size: int,
+    max_length: int,
+    device: str,
+    shuffle=True,
+    drop_last=True,
+    num_workers=0,
+    train_split=0.8,
+    val_split=0.1,
+):
+    """
+    ## Dataloader Creator
+
+    This function will create a pytorch dataloader backed by `InstructionDataset`.
+
+    > **Note**: This creator unlike `create_pretrain_dataloader` function
+    dose not split data into train, test and validation. You must pass each one path to create them.
+
+    ---
+
+    Args:
+        dataset_path (str):
+            Path to the jsonl `.jsonl` file.
+        tokenizer_name (str):
+            The tokenizer_name name which you are using.
+        batch_size (int):
+            The batch size.
+        max_length (int):
+            Maximum sequence length.
+        device (str):
+            The default device which you want to put data in it.
+        shuffle (bool):
+            Send True if you need to shuffle input text.
+        drop_last (bool):
+            This will drop last batch if it is shorter than the specified `batch_size`.
+        num_workers (int):
+            How many subprocesses to use for data loading. Safe to set > 0 here since each worker opens its own memmap handle.
+        train_split (float):
+            The precent of the train dataset.
+        val_split (float):
+            The precent of the validation dataset.
+
+    Returns:
+        A tuple of train, test, val dataloaders.
+    """
+
+    # setup datas
+
+    @dataclass
+    class instruct_dtype:
+        instruction: str
+        input: str
+        output: str
+
+    datas: list[instruct_dtype] = []
+    with open(dataset_path, "r") as f:
+        datas = json.load(f)
+
+    dataset_size = len(datas)
+    train_idx = int(dataset_size * train_split)
+    val_idx = train_idx + int(dataset_size * val_split)
+
+    train_data = datas[:train_idx].copy()
+    val_data = datas[train_idx:val_idx].copy()
+    test_data = datas[val_idx:].copy()
+    del datas
+
+    # setup dataloaders
+
+    ## I dont actully feel we need partial functions here, if you do uncomment them.
+    ## customized_collate_fn = partial(custom_collate_draft, device=device, allowed_max_length=max_length)
+    tokenizer = tiktoken.get_encoding(tokenizer_name)
+
+    train_dataset = InstructionDataset(train_data, tokenizer)
+    train_dataloader = DataLoader(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        # collate_fn=customized_collate_fn,
+        collate_fn=custom_collate_draft,
+        shuffle=shuffle,
+        drop_last=drop_last,
+        num_workers=num_workers,
+    )
+
+    test_dataset = InstructionDataset(test_data, tokenizer)
+    test_dataloader = DataLoader(
+        dataset=test_dataset,
+        batch_size=batch_size,
+        # collate_fn=customized_collate_fn,
+        collate_fn=custom_collate_draft,
+        shuffle=shuffle,
+        drop_last=drop_last,
+        num_workers=num_workers,
+    )
+
+    val_dataset = InstructionDataset(val_data, tokenizer)
+    val_dataloader = DataLoader(
+        dataset=val_dataset,
+        batch_size=batch_size,
+        # collate_fn=customized_collate_fn,
+        collate_fn=custom_collate_draft,
+        shuffle=shuffle,
+        drop_last=drop_last,
+        num_workers=num_workers,
+    )
+
+    return train_dataloader, test_dataloader, val_dataloader
 
 
 if __name__ == "__main__":
