@@ -42,10 +42,41 @@ def format_input(entry):
 def custom_collate_draft(
     batch: list[list[int]],
     pad_token_id=50256,
-    ignore_index=-100,
+    ignore_index=-100,  # why we chosed -100? because by default `torch.nn.CrossEntropyLoss` uses `-100` to ignore.
     allowed_max_length=0,
     device="cpu",
 ):
+    """
+    Collate variable-length token sequences into padded input and target tensors for causal language model training.
+    Each sequence is appended with a padding/EOF token and padded to the maximum sequence length in the batch.
+    The resulting sequence is then shifted by one position to create the input-target pair required for next-token prediction.
+
+    Padding tokens in the target tensor are replaced with `ignore_index` so that they are excluded from the loss calculation
+    by PyTorch loss functions such as `torch.nn.CrossEntropyLoss`.
+
+    If `allowed_max_length` is greater than zero, both inputs and targets are truncated to that maximum length after padding.
+
+    ---
+
+    Args:
+        batch (int): A batch of tokenized sequences. Each sequence is represented as a list of integer token IDs and may have a different length.
+        pad_token_id (int): Token ID used for padding sequences and for the sequence-ending token appended before creating the input-target pairs.
+            Defaults to ``50256``.
+        ignore_index (int): Value used to mark target positions that should be ignored when computing the loss. PyTorch's ``CrossEntropyLoss``
+            uses ``-100`` by default. Defaults to ``-100``.
+        allowed_max_length (int): Maximum number of tokens allowed in the resulting input and target sequences. A value of ``0``
+            disables truncation. Defaults to ``0``.
+        device (str): Device to which the resulting tensors are moved, such as ``"cpu"`` or ``"cuda"``. Defaults to ``"cpu"``.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]:
+            A tuple containing:
+
+            - ``inputs_tensor``: Tensor of shape ``(batch_size, sequence_length)`` containing input token IDs.
+            - ``targets_tensor``: Tensor of shape ``(batch_size, sequence_length)`` containing next-token prediction targets.
+                Padding positions are replaced with ``ignore_index``.
+    """
+
     # find the largest item in batch then get it's size and add 1 in it
     batch_max_length = max(len(item) + 1 for item in batch)
     inputs_lst, targets_lst = [], []
