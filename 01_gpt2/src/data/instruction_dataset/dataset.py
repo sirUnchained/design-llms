@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import Dataset
 import tiktoken
 
+from typing import Optional
 import json
 from pydantic.dataclasses import dataclass
 
@@ -38,7 +39,13 @@ def format_input(entry):
     return instruction_text + input_text
 
 
-def custom_collate_draft(batch: list[list[int]], pad_token_id=50256, device="cpu"):
+def custom_collate_draft(
+    batch: list[list[int]],
+    pad_token_id=50256,
+    ignore_index=-100,
+    allowed_max_length=0,
+    device="cpu",
+):
     # find the largest item in batch then get it's size and add 1 in it
     batch_max_length = max(len(item) + 1 for item in batch)
     inputs_lst, targets_lst = [], []
@@ -49,9 +56,20 @@ def custom_collate_draft(batch: list[list[int]], pad_token_id=50256, device="cpu
 
         # this is how we pad the text, prompt + (eof_token * total_prompt_len - prompt_len)
         padded = new_item + [pad_token_id] * (batch_max_length - len(new_item))
+        inputs = torch.tensor(padded[:-1])  # but we truncate last token for input text
+        targets = torch.tensor(padded[1:])  # we also ignore first token for target text
 
-        inputs = torch.tensor(padded[:-1])
-        targets = torch.tensor(padded[1:])
+        # we are now replacing all padded token (except first one) with `ignore_index`
+        mask = targets == pad_token_id
+        indices = torch.nonzero(mask).squeeze()
+        if indices.numel() > 1:
+            targets[indices[1:]] = ignore_index
+
+        # this part is optional, we jst truncate texts to be as size as `allowed_max_length`
+        if allowed_max_length > 0:
+            inputs = inputs[:allowed_max_length]
+            targets = targets[:allowed_max_length]
+
         inputs_lst.append(inputs)
         targets_lst.append(targets)
 
@@ -91,7 +109,7 @@ if __name__ == "__main__":
     print("=" * 100)
     print("PADDED TOKEN:")
     padded_text_input, padded_text_target = custom_collate_draft(
-        batch=[dataset[0], dataset[1]]
+        batch=[dataset[0], dataset[1]], allowed_max_length=1024
     )
     print("input:", padded_text_input[1])
     print("target:", padded_text_target[1])
