@@ -168,7 +168,7 @@ def create_instruction_dataloaders(
     device: str,
     shuffle=True,
     drop_last=True,
-    num_workers=0,
+    num_workers=1,
     train_split=0.8,
     val_split=0.1,
 ):

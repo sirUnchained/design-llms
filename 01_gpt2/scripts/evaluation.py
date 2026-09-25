@@ -1,5 +1,72 @@
-import torch
 import math
+
+import torch
+
+from scripts.generation import text_to_token_ids, generate_text, token_ids_to_text
+
+
+def evaluate_model(model, train_dataloader, val_dataloader, device, eval_iter):
+    """
+    ## Evaluate the model on the training and validation dataloaders.
+
+    This function computes the average loss over all batches in the training and validation sets using `calc_loader_cost`.
+    The model is temporarily set to evaluation mode, and then restored to training mode.
+
+    ---
+
+    Args:
+        model (torch.nn.Module): The neural network model to evaluate.
+        train_dataloader (DataLoader): DataLoader for the training dataset.
+        val_dataloader (DataLoader): DataLoader for the validation dataset.
+        device (torch.device): Device on which the tensors are allocated.
+        eval_iter (int): Number of batches to use for evaluation.
+
+    Returns:
+        tuple: (train_loss, val_loss) where each is a scalar tensor representing
+               the average cross-entropy loss over the respective dataloader.
+    """
+    # Evaluate model
+    model.eval()
+    with torch.no_grad():
+        train_loss = calc_loader_cost(train_dataloader, model, device, eval_iter)
+        val_loss = calc_loader_cost(val_dataloader, model, device, eval_iter)
+    model.train()
+
+    # Turn the tensores into numbers
+    train_loss = (
+        train_loss.item() if isinstance(train_loss, torch.Tensor) else train_loss
+    )
+    val_loss = val_loss.item() if isinstance(val_loss, torch.Tensor) else val_loss
+
+    return train_loss, val_loss
+
+
+def generate_and_print_sample(model, tokenizer, device, start_context):
+    """
+    ## Generate a text sample from the model and print it.
+
+    Useful for monitoring training progress: after each epoch, this function generates a fixed number of
+    tokens (10) conditioned on `start_context` and prints the resulting text on a single line.
+
+    ---
+
+    Args:
+        model (torch.nn.Module): The language model used for generation.
+        tokenizer: Tokenizer object that converts between text and token ids.
+        device (torch.device): Device where the model and tensors reside.
+        start_context (str): Initial prompt string to condition the generation.
+
+    Returns:
+        None
+    """
+    model.eval()
+    context_size = model.pos_emb.weight.shape[0]
+    encoded_text = text_to_token_ids(start_context, tokenizer).to(device)
+    with torch.no_grad():
+        token_ids = generate_text(model, encoded_text, 10, context_size)
+    decoded_text = token_ids_to_text(token_ids, tokenizer)
+    print(decoded_text.replace("\n", " "))  # Print sample as a single line
+    model.train()
 
 
 def calc_perplexity(loss) -> float:

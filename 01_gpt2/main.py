@@ -3,8 +3,8 @@ from pathlib import Path
 import json
 import random
 
-from scripts.evaluate import (
-    generate_text_with_temperature_topk,
+from scripts.generation import generate_text_with_temperature_topk
+from scripts.evaluation import (
     text_to_token_ids,
     token_ids_to_text,
 )
@@ -17,7 +17,8 @@ from src.data.instruction_dataset.dataset import (
     create_instruction_dataloaders,
     get_dataset_train_val_test_path,
 )
-from src.training.pretrain import train_model
+from src.training.pretrain import pretrain_model
+from src.training.instructtrain import instruct_train_model
 from src.models.gpt_model import GPT_model
 from src.utils.save_model_hf import save_model_hf, ensure_huggingface_login
 from src.utils.load_model import load_model_if_exists
@@ -212,7 +213,7 @@ def pre_training(model: GPT_model, cfg: GPT_configs):
             start_index=start_index,
         )
 
-    train_losses, val_losses, tokens_seen = train_model(
+    train_losses, val_losses, tokens_seen = pretrain_model(
         model,
         train_loader_fn,
         train_loader,
@@ -249,6 +250,7 @@ def instruction_training(model: GPT_model, cfg: GPT_configs):
     dataset_path = get_dataset_train_val_test_path(cfg)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)
     train_loader, test_loader, val_loader = create_instruction_dataloaders(
         dataset_path=dataset_path,
         tokenizer_name=cfg.ticktoken_tokenizer,
@@ -273,6 +275,38 @@ def instruction_training(model: GPT_model, cfg: GPT_configs):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device=device)
     optim = torch.optim.AdamW(params=model.parameters(), lr=2e-4, weight_decay=0.1)
+
+    # === TRAIN MODEL ===
+    train_losses, val_losses, tokens_seen = instruct_train_model(
+        model=model,
+        train_dataloader=train_loader,
+        val_dataloader=val_loader,
+        num_epochs=cfg.epochs,
+        optimizer=optim,
+        device=device,
+        eval_freq=10,
+        eval_iter=cfg.batch_size,
+        lr_schedule_step=cfg.lr_schedule_step,
+        start_context="Hello I am",
+        tokenizer=tokenizer,
+        create_checkpoints=cfg.create_checkpoints,
+        use_checkpoints=cfg.use_checkpoints,
+        checkpoint_freq=cfg.checkpoint_freq,
+        checkpoint_path=cfg.checkpoints_path,
+    )
+
+    # ==== SAVE MODEL WITH CONFIGS ====
+    folder_name = Path(cfg.save_model_path)
+    folder_name.mkdir(exist_ok=True)
+    torch.save(model.state_dict(), (folder_name / "pytorch_model.bin"))
+
+    with open(folder_name / "configs.json", "w") as f:
+        json.dump(cfg.__dict__, f, indent=4)
+
+    save_model_hf(cfg)
+
+    # ==== PLOT MODEL LOSSES ====
+    plot_losses(cfg.epochs, tokens_seen, train_losses, val_losses)
 
 
 def plot_losses(epochs_seen, tokens_seen, train_losses, val_losses):

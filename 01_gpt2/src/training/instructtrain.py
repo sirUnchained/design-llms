@@ -1,27 +1,20 @@
 import os
 
 import torch
-import tiktoken
 
-from scripts.logger import save_print_log
 from scripts.lr_increase_decay import learning_rate_change
+from scripts.logger import save_print_log
 from scripts.evaluation import (
-    generate_and_print_sample,
     evaluate_model,
     calc_batch_cost,
+    generate_and_print_sample,
 )
-from configs.model_configs import GPT_configs
-from src.data.pretrain_dataset.dataset import (
-    create_pretrain_dataloader,
-    ensure_bin_dataset,
-)
-from src.models.gpt_model import GPT_model
-from src.utils.ckeckpoints import load_checkpoint, save_checkpoint
+
+from src.utils.ckeckpoints import save_checkpoint, load_checkpoint
 
 
-def pretrain_model(
+def instruct_train_model(
     model,
-    train_loader_fn,
     train_dataloader: torch.utils.data.DataLoader,
     val_dataloader: torch.utils.data.DataLoader,
     num_epochs: int,
@@ -51,7 +44,6 @@ def pretrain_model(
 
     Args:
         model (torch.nn.Module): The language model to be trained.
-        train_loader_fn (function): A dynamic function which creates train dataloader for us.
         train_dataloader (DataLoader): DataLoader yielding training batches.
         val_dataloader (DataLoader): DataLoader yielding validation batches.
         num_epochs (int): Number of complete passes over the training data.
@@ -71,6 +63,9 @@ def pretrain_model(
             - train_losses (list): Recorded average training losses at each evaluation step.
             - val_losses (list): Recorded average validation losses at each evaluation step.
             - track_tokens_seen (list): Cumulative number of tokens processed at each evaluation step, used for plotting loss vs. tokens.
+
+    Note:
+        The learning rate is dynamically adjusted inside the loop via `learning_rate_change`, which is expected to be defined in the outer scope.
     """
 
     train_losses, val_losses, track_tokens_seen = [], [], []
@@ -105,7 +100,6 @@ def pretrain_model(
 
         # We refresh dataloader after every epoch by adding epoch number with seed
         this_start_index = start_index if epoch == start_epoch else 0
-        train_dataloader = train_loader_fn(epoch, this_start_index)
         print("=" * 100)
         print(f"the starting index is now {this_start_index} ")
         print(f"total remain steps is {len(train_dataloader) * num_epochs} ")
@@ -114,8 +108,7 @@ def pretrain_model(
         if total_steps is None:
             # we load a sample dataloader and getting smaples count.
             # So by multiply it to epochs we have total steps count.
-            full_loader = train_loader_fn(epoch, 0)
-            total_steps = len(full_loader) * num_epochs
+            total_steps = len(train_dataloader) * num_epochs
 
         samples_done_this_epoch = this_start_index
 
@@ -210,68 +203,3 @@ def pretrain_model(
             )
 
     return train_losses, val_losses, track_tokens_seen
-
-
-if __name__ == "__main__":
-    cfg = GPT_configs()
-
-    bin_path = ensure_bin_dataset(cfg)
-    train_ratio = 0.80
-
-    def train_loader_fn(epoch, start_index):
-        return create_pretrain_dataloader(
-            bin_path,
-            start_frac=0.0,
-            end_frac=train_ratio,
-            batch_size=cfg.batch_size,
-            max_length=cfg.context_length,
-            stride=cfg.context_length,
-            drop_last=True,
-            shuffle=True,
-            num_workers=4,
-            seed=cfg.seed,
-            epoch=epoch,
-            start_index=start_index,
-        )
-
-    tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)
-    train_loader = create_pretrain_dataloader(
-        bin_path,
-        start_frac=0.0,
-        end_frac=train_ratio,
-        batch_size=cfg.batch_size,
-        max_length=cfg.context_length,
-        stride=cfg.context_length,
-    )
-    val_loader = create_pretrain_dataloader(
-        bin_path,
-        start_frac=train_ratio,
-        end_frac=1.0,
-        shuffle=False,
-        batch_size=cfg.batch_size,
-        max_length=cfg.context_length,
-        stride=cfg.context_length,
-    )
-    epochs = 60
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    torch.manual_seed(123)
-    model = GPT_model(cfg)
-    model.to(device=device)
-    optim = torch.optim.AdamW(params=model.parameters(), lr=5e-4, weight_decay=0.1)
-
-    train_losses, val_losses, tokens_seen = pretrain_model(
-        model,
-        train_loader_fn,
-        train_loader,
-        val_loader,
-        epochs,
-        optim,
-        device,
-        eval_freq=5,
-        eval_iter=5,
-        lr_schedule_step=cfg.lr_schedule_step,
-        start_context="Hello I am ",
-        tokenizer=tokenizer,
-        checkpoint_path=cfg.checkpoints_path,
-    )
