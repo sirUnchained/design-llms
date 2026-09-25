@@ -75,7 +75,6 @@ def instruct_train_model(
     start_index = 0
 
     latest_ckpt_path = os.path.join(checkpoint_path, "latest.pt")
-    os.makedirs("./training-process", exist_ok=True)
 
     # Resume from checkpoint if requested and available
     if use_checkpoints and os.path.exists(latest_ckpt_path):

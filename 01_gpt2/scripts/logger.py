@@ -23,6 +23,9 @@ def save_print_log(
     ---
     """
 
+    if not os.path.exists("/training-process"):
+        os.makedirs("./training-process", exist_ok=True)
+
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if not torch.cuda.is_available():
         allocated = 0.0

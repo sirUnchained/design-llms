@@ -74,7 +74,7 @@ def generate_text(model, idx, max_new_tokens, content_size):
 
 
 def generate_text_with_temperature_topk(
-    model, idx, max_new_tokens, context_size, temperature=0.0, top_k=0, eos_id=None
+    model, idx, max_new_tokens, context_size, temperature=0.0, top_k=0, eos_id=50256
 ):
     """
     ## Generate new tokens using temperature scaling and optional top-k sampling.
