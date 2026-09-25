@@ -8,7 +8,10 @@ import tiktoken
 
 from scripts.evaluate import generate_text, text_to_token_ids, token_ids_to_text
 from configs.model_configs import GPT_configs
-from src.data.pretrain_dataset.dataset import create_dataloader, ensure_bin_dataset
+from src.data.pretrain_dataset.dataset import (
+    create_pretrain_dataloader,
+    ensure_bin_dataset,
+)
 from src.training.loss import calc_loader_cost, calc_batch_cost, calc_perplexity
 from src.models.gpt_model import GPT_model
 from src.utils.ckeckpoints import load_checkpoint, save_checkpoint
@@ -362,7 +365,7 @@ if __name__ == "__main__":
     train_ratio = 0.80
 
     def train_loader_fn(epoch, start_index):
-        return create_dataloader(
+        return create_pretrain_dataloader(
             bin_path,
             start_frac=0.0,
             end_frac=train_ratio,
@@ -378,7 +381,7 @@ if __name__ == "__main__":
         )
 
     tokenizer = tiktoken.get_encoding(cfg.ticktoken_tokenizer)
-    train_loader = create_dataloader(
+    train_loader = create_pretrain_dataloader(
         bin_path,
         start_frac=0.0,
         end_frac=train_ratio,
@@ -386,7 +389,7 @@ if __name__ == "__main__":
         max_length=cfg.context_length,
         stride=cfg.context_length,
     )
-    val_loader = create_dataloader(
+    val_loader = create_pretrain_dataloader(
         bin_path,
         start_frac=train_ratio,
         end_frac=1.0,
