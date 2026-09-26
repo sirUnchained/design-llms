@@ -13,3 +13,4 @@ prepare_pretrain_data.py
 fetch_gutenberg_links.py
 
 *.jsonl
+*.json

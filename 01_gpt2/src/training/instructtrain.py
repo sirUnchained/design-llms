@@ -63,9 +63,6 @@ def instruct_train_model(
             - train_losses (list): Recorded average training losses at each evaluation step.
             - val_losses (list): Recorded average validation losses at each evaluation step.
             - track_tokens_seen (list): Cumulative number of tokens processed at each evaluation step, used for plotting loss vs. tokens.
-
-    Note:
-        The learning rate is dynamically adjusted inside the loop via `learning_rate_change`, which is expected to be defined in the outer scope.
     """
 
     train_losses, val_losses, track_tokens_seen = [], [], []

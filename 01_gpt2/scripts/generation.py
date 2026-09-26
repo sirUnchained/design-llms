@@ -95,11 +95,12 @@ def generate_text_with_temperature_topk(
         top_k (int, optional): If provided, only the `top_k` tokens with the highest
             logits are considered; others are masked to -inf. Default is 0 (no filtering).
         eos_id (int, optional): Token ID that marks the end of a sequence. If provided,
-            generation stops when this token is produced. Default is None (no early stopping).
+            generation stops when this token is produced. Default is 50256.
 
     Returns:
         torch.Tensor: The extended token sequence of shape (batch_size, seq_len + generated_tokens).
     """
+
     for _ in range(max_new_tokens):
         idx_cond = idx[:, -context_size:]
 

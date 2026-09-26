@@ -205,7 +205,10 @@ def create_instruction_dataloaders(
             The precent of the validation dataset.
 
     Returns:
-        A tuple of train, test, val dataloaders.
+        tuple: A 3-element tuple containing:
+            - train_dataloader (DataLoader)
+            - test_dataloader (DataLoader)
+            - val_dataloader (DataLoader)
     """
 
     # setup datas
