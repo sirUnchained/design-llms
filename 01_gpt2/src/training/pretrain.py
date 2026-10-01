@@ -74,7 +74,6 @@ def pretrain_model(
             - val_losses (list): Recorded average validation losses at each evaluation step.
             - track_tokens_seen (list): Cumulative number of tokens processed at each evaluation step, used for plotting loss vs. tokens.
     """
-
     scaler = torch.amp.GradScaler(device=device, enabled=(device == "cuda"))
 
     train_losses, val_losses, track_tokens_seen = [], [], []
@@ -184,7 +183,7 @@ def pretrain_model(
                 and global_step > 0
             ):
                 save_checkpoint(
-                    scaler=scaler,
+                    scaler=scaler if use_amp else None,
                     path=latest_ckpt_path,
                     model=model,
                     optimizer=optimizer,
@@ -204,7 +203,7 @@ def pretrain_model(
         if create_checkpoints:
             epoch_ckpt_path = os.path.join(checkpoint_path, f"epoch_{epoch+1}.pt")
             save_checkpoint(
-                scaler=scaler,
+                scaler=scaler if use_amp else None,
                 path=epoch_ckpt_path,
                 model=model,
                 optimizer=optimizer,
@@ -219,7 +218,7 @@ def pretrain_model(
             )
             # also update "latest" so resuming picks up here
             save_checkpoint(
-                scaler=scaler,
+                scaler=scaler if use_amp else None,
                 path=latest_ckpt_path,
                 model=model,
                 optimizer=optimizer,
