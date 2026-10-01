@@ -128,7 +128,7 @@ def pretrain_model(
 
             if use_amp:
                 with torch.amp.autocast(
-                    device_type=device, dtype=torch.float16, enabled=(device == "cuda")
+                    device_type=device, dtype=torch.bfloat16, enabled=(device == "cuda")
                 ):
                     loss = calc_batch_cost(input_batch, target_batch, model, device)
 
