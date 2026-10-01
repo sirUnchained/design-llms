@@ -230,6 +230,7 @@ def pre_training(model: GPT_model, cfg: GPT_configs):
         use_checkpoints=cfg.use_checkpoints,
         checkpoint_freq=cfg.checkpoint_freq,
         checkpoint_path=cfg.checkpoints_path,
+        use_amp=True,
     )
 
     # ==== SAVE MODEL WITH CONFIGS ====

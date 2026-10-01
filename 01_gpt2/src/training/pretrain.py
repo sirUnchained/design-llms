@@ -36,6 +36,7 @@ def pretrain_model(
     checkpoint_freq: int = 1000,
     use_checkpoints=False,
     create_checkpoints=False,
+    use_amp=False,
 ):
     """
     Trains a language model over multiple epochs with periodic evaluation and checkpointing.
@@ -65,6 +66,7 @@ def pretrain_model(
         checkpoint_freq (int, optional): If `create_checkpoints` is True, save a checkpoint every N global steps. Defaults to 1000.
         use_checkpoints (bool, optional): If True, attempt to resume training from`{checkpoint_path}/latest.pt`. Defaults to False.
         create_checkpoints (bool, optional): If True, save periodic and end-of-epoch checkpoints to `checkpoint_path`. Defaults to False.
+        use_amp (bool): using Automatic Mixed Precisions, default is `False`.
 
     Returns:
         tuple: A 3-element tuple containing:
@@ -72,6 +74,8 @@ def pretrain_model(
             - val_losses (list): Recorded average validation losses at each evaluation step.
             - track_tokens_seen (list): Cumulative number of tokens processed at each evaluation step, used for plotting loss vs. tokens.
     """
+
+    scaler = torch.amp.GradScaler(device=device, enabled=(device == "cuda"))
 
     train_losses, val_losses, track_tokens_seen = [], [], []
     tokens_seen, global_step = 0, -1
@@ -92,6 +96,8 @@ def pretrain_model(
         track_tokens_seen = checkpoint["track_tokens_seen"]
         start_index = checkpoint.get("start_index", start_index)
         total_steps = checkpoint.get("total_steps", total_steps)
+        if "scaler_state_dict" in checkpoint:
+            scaler.load_state_dict(checkpoint["scaler_state_dict"])
     elif use_checkpoints:
         print(
             f"`use_checkpoints` is true but no checkpoint found at {latest_ckpt_path}, starting fresh."
@@ -120,9 +126,20 @@ def pretrain_model(
 
         for step, (input_batch, target_batch) in enumerate(train_dataloader):
             optimizer.zero_grad()
-            loss = calc_batch_cost(input_batch, target_batch, model, device)
-            loss.backward()
-            optimizer.step()
+
+            if use_amp:
+                with torch.amp.autocast(
+                    device_type=device, dtype=torch.float16, enabled=(device == "cuda")
+                ):
+                    loss = calc_batch_cost(input_batch, target_batch, model, device)
+
+                scaler.scale(loss).backward()
+                scaler.step(optimizer=optimizer)
+                scaler.update()
+            else:
+                loss = calc_batch_cost(input_batch, target_batch, model, device)
+                loss.backward()
+                optimizer.step()
 
             tokens_seen += input_batch.numel()
             global_step += 1
@@ -140,7 +157,12 @@ def pretrain_model(
             if global_step % eval_freq == 0:
                 # Evaluate model and it the returned
                 train_loss, val_loss = evaluate_model(
-                    model, train_dataloader, val_dataloader, device, eval_iter
+                    model,
+                    train_dataloader,
+                    val_dataloader,
+                    device,
+                    eval_iter,
+                    use_amp=use_amp,
                 )
 
                 train_losses.append(train_loss)
@@ -162,6 +184,7 @@ def pretrain_model(
                 and global_step > 0
             ):
                 save_checkpoint(
+                    scaler=scaler,
                     path=latest_ckpt_path,
                     model=model,
                     optimizer=optimizer,
@@ -181,6 +204,7 @@ def pretrain_model(
         if create_checkpoints:
             epoch_ckpt_path = os.path.join(checkpoint_path, f"epoch_{epoch+1}.pt")
             save_checkpoint(
+                scaler=scaler,
                 path=epoch_ckpt_path,
                 model=model,
                 optimizer=optimizer,
@@ -195,6 +219,7 @@ def pretrain_model(
             )
             # also update "latest" so resuming picks up here
             save_checkpoint(
+                scaler=scaler,
                 path=latest_ckpt_path,
                 model=model,
                 optimizer=optimizer,
