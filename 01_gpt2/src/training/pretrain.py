@@ -4,7 +4,7 @@ import torch
 import tiktoken
 
 from scripts.logger import save_print_log
-from scripts.lr_increase_decay import learning_rate_change
+from scripts.lr_warmup_cosinedecay import learning_rate_change
 from scripts.evaluation import (
     generate_and_print_sample,
     evaluate_model,

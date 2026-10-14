@@ -2,7 +2,7 @@ import os
 
 import torch
 
-from scripts.lr_increase_decay import learning_rate_change
+from scripts.lr_warmup_cosinedecay import learning_rate_change
 from scripts.logger import save_print_log
 from scripts.evaluation import (
     evaluate_model,
