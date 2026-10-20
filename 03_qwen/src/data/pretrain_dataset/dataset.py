@@ -116,7 +116,7 @@ def get_bin_path(data_path: str, tokenizer_name: str) -> str:
     """
 
     root, _ = os.path.splitext(data_path)
-    return root + f"_{tokenizer_name}_tokenizer" + ".bin"
+    return root + f"_{tokenizer_name.replace('/', '_')}_tokenizer" + ".bin"
 
 
 def ensure_bin_dataset(cfg: Qwen_Configs) -> str:

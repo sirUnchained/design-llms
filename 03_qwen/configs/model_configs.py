@@ -25,6 +25,7 @@ class Qwen_Configs:
     lr_schedule_step = 0
 
     tokenizer_name = "Qwen/Qwen3-0.6B"
+
     data_path = "./data/llm_dataset.txt"
     save_model_path = "model-weights/"
     repo_id = "INVALID"
