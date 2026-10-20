@@ -25,7 +25,7 @@ from src.utils.load_model import load_model_if_exists
 
 import torch
 import numpy
-import tiktoken
+from transformers import AutoTokenizer
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from torchinfo import summary
@@ -129,7 +129,7 @@ def generate(model, cfg: Qwen_Configs, prompt: str):
     temperatures = [0.0, 0.3, 0.7, 1.3, 1.6]
     top_ks = [0, 30, 70, 90, 120]
 
-    tokenizer = tiktoken.get_encoding(cfg.tokenizer_name)
+    tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer_name)
     user_input = text_to_token_ids(text=prompt, tokenizer=tokenizer).to(device=device)
 
     model.to(device=device)
@@ -155,7 +155,7 @@ def pre_training(model: Qwen3Model, cfg: Qwen_Configs):
     bin_path = ensure_bin_dataset(cfg)
     train_ratio = 0.80
 
-    tokenizer = tiktoken.get_encoding(cfg.tokenizer_name)
+    tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer_name)
     train_loader = create_pretrain_dataloader(
         bin_path,
         batch_size=cfg.batch_size,
@@ -249,7 +249,7 @@ def instruction_training(model: Qwen3Model, cfg: Qwen_Configs):
     dataset_path = get_dataset_train_val_test_path(cfg)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    tokenizer = tiktoken.get_encoding(cfg.tokenizer_name)
+    tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer_name)
     train_loader, test_loader, val_loader = create_instruction_dataloaders(
         dataset_path=dataset_path,
         tokenizer_name=cfg.tokenizer_name,
