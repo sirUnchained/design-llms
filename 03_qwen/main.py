@@ -1,0 +1,320 @@
+from pprint import pprint
+from pathlib import Path
+import json
+import random
+
+from scripts.generation import generate_text_with_temperature_topk
+from scripts.evaluation import (
+    text_to_token_ids,
+    token_ids_to_text,
+)
+from configs.model_configs import get_Qwen_Configs, Qwen_Configs
+from src.data.pretrain_dataset.dataset import (
+    create_pretrain_dataloader,
+    ensure_bin_dataset,
+)
+from src.data.instruction_dataset.dataset import (
+    create_instruction_dataloaders,
+    get_dataset_train_val_test_path,
+)
+from src.training.pretrain import pretrain_model
+from src.training.instructtrain import instruct_train_model
+from src.models.qwen_model import Qwen3Model
+from src.utils.save_model_hf import save_model_hf, ensure_huggingface_login
+from src.utils.load_model import load_model_if_exists
+
+import torch
+import numpy
+import tiktoken
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+from torchinfo import summary
+
+
+import sys
+
+
+def main():
+    # --- Parse command-line args (simple, no argparse overhead) ---
+    args = sys.argv[1:]  # Skip script name
+    cfg = get_Qwen_Configs()
+
+    if cfg.seed != 0:
+        torch.manual_seed(seed=cfg.seed)
+        numpy.random.seed(seed=cfg.seed)
+        random.seed(cfg.seed)
+
+    print("Welcome to the qwen3 model pipeline! loading stuff please wait ...")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = Qwen3Model(cfg).to(device=device)
+    print(f"Current device is {device}.")
+
+    if cfg.repo_id != "INVALID":
+        ensure_huggingface_login(cfg=cfg)
+
+    if "-t" in args:
+        print("start pre-train process ...")
+        pre_training(model, cfg)
+        print("pre-training process finished, Now you can use model.")
+        return 0
+
+    if "-g" in args:
+        # Check if a prompt was passed with -p, else ask interactively
+        if "-p" in args:
+            prompt = args[args.index("-p") + 1]
+        else:
+            prompt = input("Enter your prompt: ")
+
+        if load_model_if_exists(cfg, model, device):
+            generate(model, cfg, prompt)
+        else:
+            print("Model not found, try to train it first.")
+        return 0
+
+    if "-i" in args:
+        model_info(model, cfg)
+        return 0
+
+    # --- Original Interactive Loop ---
+    while True:
+        print(
+            "Chose what to do: (q = quit, t = train, g = generate, i = model and configs info)"
+        )
+        inp = input().lower()
+
+        if inp == "q":
+            print("Bye!")
+            return 0
+
+        elif inp == "t":
+            print("start pre-train process ...")
+            pre_training(model, cfg)
+            print("pre-training process finished, Now you can use model.")
+            return 0
+
+        elif inp == "g":
+            if load_model_if_exists(cfg, model, device):
+                prompt = input("Enter your prompt: ")
+                generate(model, cfg, prompt)
+                return 0
+            print("Model not found, try to train it first.")
+
+        elif inp == "i":
+            model_info(model, cfg)
+
+        else:
+            print("unknown input, try again.")
+
+
+def model_info(model, cfg):
+    print("Model's configuration:")
+    pprint(cfg.__dict__)
+    print("=================================================================")
+    print("Model's real tranable parameters count:")
+    print(sum(p.numel() for p in model.parameters()))
+    print("Model's architecture (torchinfo summary):")
+    summary(model)
+
+
+def generate(model, cfg: Qwen_Configs, prompt: str):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    temperatures = [0.0, 0.3, 0.7, 1.3, 1.6]
+    top_ks = [0, 30, 70, 90, 120]
+
+    tokenizer = tiktoken.get_encoding(cfg.tokenizer_name)
+    user_input = text_to_token_ids(text=prompt, tokenizer=tokenizer).to(device=device)
+
+    model.to(device=device)
+    model.eval()
+
+    for temp, top in zip(temperatures, top_ks):
+        generated_ids = generate_text_with_temperature_topk(
+            model=model,
+            idx=user_input,
+            context_size=cfg.context_length,
+            max_new_tokens=128,
+            top_k=top,
+            temperature=temp,
+        )
+        print("=" * 100)
+        print(f"using temperature {temp} and top_k {top}:")
+        print(token_ids_to_text(generated_ids, tokenizer))
+        print("=" * 100)
+
+
+def pre_training(model: Qwen3Model, cfg: Qwen_Configs):
+    # ==== TOKENIZE ONCE (CACHED) AND BUILD TRAIN/VAL LOADERS FROM ONE BIN FILE ====
+    bin_path = ensure_bin_dataset(cfg)
+    train_ratio = 0.80
+
+    tokenizer = tiktoken.get_encoding(cfg.tokenizer_name)
+    train_loader = create_pretrain_dataloader(
+        bin_path,
+        batch_size=cfg.batch_size,
+        max_length=cfg.context_length,
+        stride=cfg.context_length,
+        drop_last=True,
+        shuffle=True,
+        num_workers=4,
+        start_frac=0.0,
+        end_frac=train_ratio,
+    )
+    val_loader = create_pretrain_dataloader(
+        bin_path,
+        batch_size=cfg.batch_size,
+        max_length=cfg.context_length,
+        stride=cfg.context_length,
+        drop_last=False,
+        shuffle=False,
+        num_workers=0,
+        start_frac=train_ratio,
+        end_frac=1.0,
+    )
+
+    print("=" * 100)
+    print(
+        f"We are going to train model {cfg.epochs} Epochs. "
+        f"Our batch size is {cfg.batch_size}. "
+        f"We have {len(train_loader)} train samples. "
+        f"We have {len(val_loader)} validation samples. "
+        f"The model will be trained in {len(train_loader) * cfg.epochs} steps. "
+    )
+    print("=" * 100)
+
+    # ==== SETUP EPOCHS DEVICE AND OPTIMIZER ====
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device=device)
+    optim = torch.optim.AdamW(params=model.parameters(), lr=2e-4, weight_decay=0.1)
+
+    # ==== TRAIN MODEL ====
+    def train_loader_fn(epoch, start_index):
+        return create_pretrain_dataloader(
+            bin_path,
+            start_frac=0.0,
+            end_frac=train_ratio,
+            batch_size=cfg.batch_size,
+            max_length=cfg.context_length,
+            stride=cfg.context_length,
+            drop_last=True,
+            shuffle=True,
+            num_workers=4,
+            seed=cfg.seed,
+            epoch=epoch,
+            start_index=start_index,
+        )
+
+    train_losses, val_losses, tokens_seen = pretrain_model(
+        model,
+        train_loader_fn,
+        train_loader,
+        val_loader,
+        cfg.epochs,
+        optim,
+        device,
+        eval_freq=10,
+        eval_iter=cfg.batch_size,
+        lr_schedule_step=cfg.lr_schedule_step,
+        start_context="Hello I am",
+        tokenizer=tokenizer,
+        create_checkpoints=cfg.create_checkpoints,
+        use_checkpoints=cfg.use_checkpoints,
+        checkpoint_freq=cfg.checkpoint_freq,
+        checkpoint_path=cfg.checkpoints_path,
+        use_amp=True,
+    )
+
+    # ==== SAVE MODEL WITH CONFIGS ====
+    folder_name = Path(cfg.save_model_path)
+    folder_name.mkdir(exist_ok=True)
+    torch.save(model.state_dict(), (folder_name / "pytorch_model.bin"))
+
+    with open(folder_name / "configs.json", "w") as f:
+        json.dump(cfg.__dict__, f, indent=4)
+
+    save_model_hf(cfg)
+
+    # ==== PLOT MODEL LOSSES ====
+    plot_losses(cfg.epochs, tokens_seen, train_losses, val_losses)
+
+
+def instruction_training(model: Qwen3Model, cfg: Qwen_Configs):
+    dataset_path = get_dataset_train_val_test_path(cfg)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    tokenizer = tiktoken.get_encoding(cfg.tokenizer_name)
+    train_loader, test_loader, val_loader = create_instruction_dataloaders(
+        dataset_path=dataset_path,
+        tokenizer_name=cfg.tokenizer_name,
+        batch_size=cfg.batch_size,
+        max_length=cfg.context_length,
+        device=device,
+        drop_last=True,
+        num_workers=5,
+    )
+
+    print("=" * 100)
+    print(
+        f"We are going to train model {cfg.epochs} Epochs. "
+        f"Our batch size is {cfg.batch_size}. "
+        f"We have {len(train_loader)} train samples. "
+        f"We have {len(val_loader)} validation samples. "
+        f"The model will be trained in {len(train_loader) * cfg.epochs} steps. "
+    )
+    print("=" * 100)
+
+    # ==== SETUP EPOCHS DEVICE AND OPTIMIZER ====
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device=device)
+    optim = torch.optim.AdamW(params=model.parameters(), lr=2e-4, weight_decay=0.1)
+
+    # === TRAIN MODEL ===
+    train_losses, val_losses, tokens_seen = instruct_train_model(
+        model=model,
+        train_dataloader=train_loader,
+        val_dataloader=val_loader,
+        num_epochs=cfg.epochs,
+        optimizer=optim,
+        device=device,
+        eval_freq=10,
+        eval_iter=cfg.batch_size,
+        lr_schedule_step=cfg.lr_schedule_step,
+        start_context="Hello I am",
+        tokenizer=tokenizer,
+        create_checkpoints=cfg.create_checkpoints,
+        use_checkpoints=cfg.use_checkpoints,
+        checkpoint_freq=cfg.checkpoint_freq,
+        checkpoint_path=cfg.checkpoints_path,
+    )
+
+    # ==== SAVE MODEL WITH CONFIGS ====
+    folder_name = Path(cfg.save_model_path)
+    folder_name.mkdir(exist_ok=True)
+    torch.save(model.state_dict(), (folder_name / "pytorch_model.bin"))
+
+    with open(folder_name / "configs.json", "w") as f:
+        json.dump(cfg.__dict__, f, indent=4)
+
+    save_model_hf(cfg)
+
+    # ==== PLOT MODEL LOSSES ====
+    plot_losses(cfg.epochs, tokens_seen, train_losses, val_losses)
+
+
+def plot_losses(epochs_seen, tokens_seen, train_losses, val_losses):
+    fig, ax1 = plt.subplots(figsize=(5, 3))
+    ax1.plot(epochs_seen, train_losses, label="Training loss")
+    ax1.plot(epochs_seen, val_losses, linestyle="-.", label="Validation loss")
+    ax1.set_xlabel("Epochs")
+    ax1.set_ylabel("Loss")
+    ax1.legend(loc="upper right")
+    ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax2 = ax1.twiny()
+    ax2.plot(tokens_seen, train_losses, alpha=0)
+    ax2.set_xlabel("Tokens seen")
+    fig.tight_layout()
+
+    fig.savefig("train-val-loss.png")
+
+
+if __name__ == "__main__":
+    main()
