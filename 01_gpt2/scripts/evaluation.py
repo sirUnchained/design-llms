@@ -5,7 +5,9 @@ import torch
 from scripts.generation import text_to_token_ids, generate_text, token_ids_to_text
 
 
-def evaluate_model(model, train_dataloader, val_dataloader, device, eval_iter):
+def evaluate_model(
+    model, train_dataloader, val_dataloader, device, eval_iter, use_amp=False
+):
     """
     ## Evaluate the model on the training and validation dataloaders.
 
@@ -20,16 +22,25 @@ def evaluate_model(model, train_dataloader, val_dataloader, device, eval_iter):
         val_dataloader (DataLoader): DataLoader for the validation dataset.
         device (torch.device): Device on which the tensors are allocated.
         eval_iter (int): Number of batches to use for evaluation.
+        use_amp (bool): using Automatic Mixed Precisions, default is `False`.
 
     Returns:
         tuple: (train_loss, val_loss) where each is a scalar tensor representing
                the average cross-entropy loss over the respective dataloader.
     """
+
     # Evaluate model
     model.eval()
-    with torch.no_grad():
-        train_loss = calc_loader_cost(train_dataloader, model, device, eval_iter)
-        val_loss = calc_loader_cost(val_dataloader, model, device, eval_iter)
+    if use_amp:
+        with torch.no_grad(), torch.amp.autocast(
+            device_type=device, dtype=torch.float16, enabled=(device == "cuda")
+        ):
+            train_loss = calc_loader_cost(train_dataloader, model, device, eval_iter)
+            val_loss = calc_loader_cost(val_dataloader, model, device, eval_iter)
+    else:
+        with torch.no_grad():
+            train_loss = calc_loader_cost(train_dataloader, model, device, eval_iter)
+            val_loss = calc_loader_cost(val_dataloader, model, device, eval_iter)
     model.train()
 
     # Turn the tensores into numbers

@@ -65,6 +65,7 @@ def save_checkpoint(
     val_losses,
     track_tokens_seen,
     total_steps,
+    scaler,
     start_index=0,
 ):
     """Save everything needed to exactly resume training, and mirror it to the
@@ -74,21 +75,23 @@ def save_checkpoint(
     and only the local save happens, same as before.
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    torch.save(
-        {
-            "epoch": epoch,
-            "global_step": global_step,
-            "tokens_seen": tokens_seen,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "train_losses": train_losses,
-            "val_losses": val_losses,
-            "track_tokens_seen": track_tokens_seen,
-            "total_steps": total_steps,
-            "start_index": start_index,
-        },
-        path,
-    )
+    state = {
+        "epoch": epoch,
+        "global_step": global_step,
+        "tokens_seen": tokens_seen,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "train_losses": train_losses,
+        "val_losses": val_losses,
+        "track_tokens_seen": track_tokens_seen,
+        "total_steps": total_steps,
+        "start_index": start_index,
+    }
+
+    if scaler is not None:
+        state["scaler_state_dict"] = scaler.state_dict()
+
+    torch.save(state, path)
     print(f"Checkpoint saved to {path}")
 
     repo_id = _repo_id()

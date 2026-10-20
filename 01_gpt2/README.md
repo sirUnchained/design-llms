@@ -14,104 +14,45 @@ A from-scratch PyTorch implementation of a GPT-2 style decoder-only transformer,
 - Resumable checkpoints, mirrored automatically to a Hugging Face Hub repo
 - Greedy and temperature/top-k sampling for text generation
 - Simple CLI (`-t` train, `-g` generate, `-i` info) plus an interactive fallback menu
-
-## Architecture
-
-```mermaid
-flowchart TD
-    A["Input token ids (batch, seq_len)"] --> B["Token Embedding"]
-    A --> C["Positional Embedding"]
-    B --> D["Add"]
-    C --> D
-    D --> E["Dropout"]
-    E --> F["Transformer Block x N layers"]
-    F --> G["Final LayerNorm"]
-    G --> H["Linear Output Head"]
-    H --> I["Logits (batch, seq_len, vocab_size)"]
-```
-
-### Transformer Block
-
-```mermaid
-flowchart TD
-    X["Input x"] --> N1["LayerNorm"]
-    N1 --> MHA["Multi-Head Attention"]
-    MHA --> D1["Dropout"]
-    D1 --> S1["Add (residual)"]
-    X --> S1
-    S1 --> N2["LayerNorm"]
-    N2 --> FF["Feed Forward (Linear -> GELU -> Linear)"]
-    FF --> D2["Dropout"]
-    D2 --> S2["Add (residual)"]
-    S1 --> S2
-    S2 --> OUT["Output"]
-```
-
-### Multi-Head Attention
-
-```mermaid
-flowchart LR
-    X["Input x"] --> Q["Linear: Query"]
-    X --> K["Linear: Key"]
-    X --> V["Linear: Value"]
-    Q --> SPLIT1["Split into heads"]
-    K --> SPLIT2["Split into heads"]
-    V --> SPLIT3["Split into heads"]
-    SPLIT1 --> ATT["Scaled Dot-Product Attention + Causal Mask"]
-    SPLIT2 --> ATT
-    ATT --> SOFT["Softmax + Dropout"]
-    SOFT --> CTX["Weighted Sum with Values"]
-    SPLIT3 --> CTX
-    CTX --> MERGE["Concatenate heads"]
-    MERGE --> PROJ["Linear: Output Projection"]
-    PROJ --> OUT["Context vectors"]
-```
-
-### Data Pipeline
-
-```mermaid
-flowchart TD
-    A["Raw corpus (.txt / .jsonl)"] --> B{".bin already exists?"}
-    B -- no --> C["tokenize_to_bin: stream-encode in chunks"]
-    C --> D["Write uint16 tokens to .bin via memmap"]
-    B -- yes --> E["Reuse existing .bin"]
-    D --> F["MemmapGPTDataset: lazy random-access reads"]
-    E --> F
-    F --> G["DataLoader (num_workers, pin_memory)"]
-    G --> H["Train / Val split by token-position range"]
-```
+- This version uses pytorch [`Automatic Mixed Precision (AMP)`](https://docs.pytorch.org/docs/2.14/amp.html), so insted of `float32`, it uses `BF16` to do some of models math operations so we could save 1GB of T4 GPU VRAM (it was a good try for me).
+- We also tie the **input and output** embeddings of the decoder which make model so much smaller (around 38M params!).
 
 ## Project Structure
 
-```
+```bash
 .
-├── main.py                     # CLI entry point (train / generate / info)
+├── main.py                          # CLI entry point (train / generate / info)
 ├── configs/
-│   └── model_configs.py        # GPT_configs dataclass + .env loader
+│   └── model_configs.py             # LLM_configs dataclass + .env loader
 ├── scripts/
-│   └── evaluate.py             # Tokenization helpers + text generation
+│   ├── evaluation.py                # All functions which we use to evaluate models (including loss function)
+│   ├── generation.py                # Some function which used to text generating
+│   ├── logger.py                    # Simple logger which logs some stuff for exploring
+│   └── lr_warmup_cosinedecay.py     # LR warmup + Cosine decay function is here
 ├── src/
 │   ├── data/
-│   │   │
-│   │   pretrain_dataset/
+│   │   ├── instruction_dataset/
+│   │   │   └── dataset.py          # Instruction dataset handler which converts json to prompt
+│   │   └── pretrain_dataset/
 │   │       ├── tokenize.py         # One-time corpus -> uint16 .bin tokenization
-│   │       └── dataset.py          # Memmap Dataset, DataLoader, .bin caching
+│   │       ├── dataset.py          # Memmap Dataset, DataLoader, .bin caching
+│   │       └── sampler.py          # The resumable sampler class which help us to continue from last checkpoint data index
 │   ├── models/
-│   │   ├── gpt_model.py        # Top-level GPT_model
+│   │   ├── gpt_model.py             # Top-level GPT_model, a psycho has build this (so you know it is good)
 │   │   ├── transformer_block.py
 │   │   ├── multi_head_attention.py
 │   │   ├── feed_forward.py
-│   │   ├── activations.py      # GELU
-│   │   └── normalizers.py      # LayerNorm
+│   │   ├── activations.py           # GELU 
+│   │   └── normalizers.py           # LayerNorm
 │   ├── training/
-│   │   ├── train.py            # Training loop, checkpoint resume, LR schedule
-│   │   └── loss.py             # Cross-entropy loss + perplexity
+│   │   ├── pretrain.py              # The pretrain module which we use to pretrain model
+│   │   └── instructtrain.py         # The instruction tuning module which we use to do teach model how to follow instructions
 │   └── utils/
-│       ├── load_model.py       # Load local weights if present
-│       ├── save_model_hf.py    # Push model + config to HF Hub
-│       └── ckeckpoints.py      # Save/load training checkpoints (local + HF)
+│       ├── load_model.py            # Load local weights if present
+│       ├── save_model_hf.py         # Push model + config to HF Hub
+│       └── ckeckpoints.py           # Save/load training checkpoints (local + HF)
 ├── requirements.txt
-└── .env                        # Runtime configuration (not committed with real secrets)
+└── .env                             # Runtime configuration (not committed with real secrets)
 ```
 
 ## Setup
@@ -123,8 +64,9 @@ pip install -r requirements.txt
 Configure your run in `.env`:
 
 ```env
-EPOCHS=30
-BATCH_SIZE=2
+EPOCHS=1
+BATCH_SIZE=4
+
 VOCAB_SIZE=50257
 CONTEXT_LENGTH=1024
 EMB_DIM=768
@@ -132,23 +74,25 @@ N_HEADS=12
 N_LAYERS=12
 DROP_RATE=0.2
 QKV_BIAS=True
-TIKTOKEN_TOKENIZER=gpt2
+TIKTOKEN_TOKENIZER="gpt2"
 
-DATA_PATH=./data/llm_dataset.jsonl
-SAVE_MODEL_PATH=model-weights/
-REPO_ID=your-username/your-repo
+SEED = 42
+
+DATA_PATH="./data/llm_dataset.jsonl"
+SAVE_MODEL_PATH="model-weights/"
+REPO_ID="your-username/your-repo"
+
+LR_SCHEDULE_STEP = 0
 
 CHECKPOINT_FREQ=1000
 CREAET_CHECKPOINTS=true
 USE_CHECKPOINTS=true
-CHECKPOINTS_PATH=check-points/
+CHECKPOINTS_PATH="check-points/"
 ```
-
-> Data can be a plain `.txt` file or a `.jsonl` file where each line has a `"text"` field.
 
 ### Dataset tokenization (automatic, cached)
 
-On the first training run, the corpus at `DATA_PATH` is tokenized once and written to a `uint16` binary file next to it (e.g. `./data/llm_dataset.jsonl` $\to$ `./data/llm_dataset.bin`). Every subsequent run reuses that `.bin` file directly via `numpy.memmap` instead of re-tokenizing, and only the token windows actually being read are paged into memory — so a 7GB+ corpus trains with roughly the same RAM footprint as a tiny one. Delete the `.bin` file (or pass `force=True` to `prepare_bin_dataset`) if you change the source data and need to re-tokenize.
+On the first training run, the corpus at `DATA_PATH` is tokenized once and written to a `uint16` binary file next to it (e.g. `./data/llm_dataset.jsonl` $\to$ `./data/llm_dataset.bin`). Every subsequent run reuses that `.bin` file directly via `numpy.memmap` instead of re-tokenizing, and only the token windows actually being read are paged into memory - so a 7GB+ corpus trains with roughly the same RAM footprint as a tiny one. Delete the `.bin` file (or pass `force=True` to `prepare_bin_dataset`) if you change the source data and need to re-tokenize.
 
 If `REPO_ID` is a valid Hugging Face repo id, the app will prompt for login (or read `HF_TOKEN`) and automatically push weights, config, and checkpoints to the Hub.
 
