@@ -8,4 +8,4 @@ torch
 torchinfo
 tqdm
 numpy
-# langdetect
+langdetect
