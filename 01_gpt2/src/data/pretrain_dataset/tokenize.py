@@ -1,4 +1,3 @@
-# src/data/tokenize.py
 import json
 
 import numpy as np

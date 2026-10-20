@@ -1,0 +1,273 @@
+import os
+
+import torch
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+import numpy as np
+
+from configs.model_configs import Qwen_Configs, get_Qwen_Configs
+from src.data.pretrain_dataset.tokenize import tokenize_to_bin
+from src.data.pretrain_dataset.sampler import ResumableRandomSampler
+
+
+class MemmapDataset(Dataset):
+    """
+    ## Memory-Mapped Qwen Dataset Class
+
+    This class makes your pre-tokenized binary corpus ready for the model to learn on it, without ever loading the full token sequence into RAM.
+
+    Unlike a dataset that tokenizes raw text up front and pre-materializes every training chunk as a tensor, this class reads token ids lazily from
+    a `uint32` binary file on disk using `numpy.memmap`. Only the slice of tokens needed for the requested chunk is paged into memory, so RAM usage
+    stays flat no matter how large the underlying dataset is.
+
+    A `[start_idx, end_idx)` token range can be given so a single binary file can be shared between a train split and a val split without
+    duplicating it on disk.
+
+    The memmap handle is opened lazily inside `__getitem__` (not `__init__`) so that each DataLoader worker process opens its own file handle, which
+    is required for correctness when `num_workers > 0`.
+
+    ---
+
+    Args:
+        bin_path (str): Path to the binary file of `uint32` token ids.
+        context_length (int): Maximum sequence length (number of tokens per sample).
+        stride (int): Stride per sample, in tokens. Use `stride == context_length` for non-overlapping chunks.
+        start_idx (int, optional): First token index (inclusive) this dataset is allowed to read from. Default is 0.
+        end_idx (int, optional): Last token index (exclusive) this dataset is allowed to read up to. Default is `None`, meaning the end of the file.
+    """
+
+    def __init__(
+        self, bin_path, context_length, stride, start_idx=0, end_idx=None
+    ) -> None:
+        self.bin_path = bin_path
+        self.context_length = context_length
+        self.stride = stride
+        self.start_idx = start_idx
+
+        # Opened here only to read the token count cheaply; not kept around,
+        # since the real per-worker handle is opened lazily in __getitem__.
+        data = np.memmap(bin_path, dtype=np.uint32, mode="r")
+        n_tokens = data.shape[0]
+        self.end_idx = n_tokens if end_idx is None else min(end_idx, n_tokens)
+
+        usable_tokens = self.end_idx - self.start_idx
+        self.length = max(0, (usable_tokens - context_length) // stride)
+
+        self._data = None
+
+    def _ensure_open(self):
+        """
+        ## Lazily open the memmap handle for the current process.
+
+        Ensures each DataLoader worker process (when `num_workers > 0`) opens its own independent memmap handle rather than sharing one created in
+        the main process, which numpy's memmap does not support safely across forked/spawned workers.
+
+        ---
+
+        Args:
+            None
+
+        Returns:
+            None: Sets `self._data` in place.
+        """
+        if self._data is None:
+            self._data = np.memmap(self.bin_path, dtype=np.uint32, mode="r")
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        """
+        ## Fetch one (input, target) chunk pair by index.
+
+        Reads a single window of `context_length + 1` tokens starting at `start_idx + idx * stride` from the memmap, then splits it into an
+        input chunk (all but the last token) and a target chunk (all but the first token) — the standard next-token-prediction shift.
+
+        ---
+
+        Args:
+            idx (int): Index of the sample to fetch, relative to this dataset's `[start_idx, end_idx)` range.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: `(input_ids, target_ids)`, each of shape `(context_length,)` and dtype `int64`.
+        """
+        self._ensure_open()
+        start = self.start_idx + idx * self.stride
+        chunk = self._data[start : start + self.context_length + 1]
+        x = torch.from_numpy(chunk[:-1].astype(np.int64))
+        y = torch.from_numpy(chunk[1:].astype(np.int64))
+        return x, y
+
+
+def get_bin_path(data_path: str, tokenizer_name: str) -> str:
+    """
+    ## Derive the tokenized binary path for a given raw data path.
+
+    Keeps the tokenized cache next to the source corpus, same name, `.bin` extension. So `./data/llm_dataset.jsonl` maps to
+    `./data/llm_dataset_{tokenizer_name}_tokenizer.bin`.
+
+    ---
+
+    Args:
+        data_path (str): Path to the raw `.txt` or `.jsonl` corpus.
+
+    Returns:
+        str: Path to the corresponding `.bin` tokenized file.
+    """
+
+    root, _ = os.path.splitext(data_path)
+    return root + f"_{tokenizer_name}_tokenizer" + ".bin"
+
+
+def ensure_bin_dataset(cfg: Qwen_Configs) -> str:
+    """
+    ## Verify a tokenized binary exists for the configured dataset.
+
+    Tokenization is no longer something training does for you -- it now lives entirely in `data/prepare_data.py`, run once as a separate,
+    offline data-prep step (scrape -> filter -> tokenize) before you ever start `main.py -t`. This function just checks that the expected `.bin`
+    file (see `get_bin_path`) is present, and raises immediately with clear next steps if it isn't, rather than silently tokenizing mid-training run.
+
+    ---
+
+    Args:
+        cfg (Qwen_Configs): Your model config class. Uses `cfg.data_path` to derive the expected `.bin` path.
+
+    Returns:
+        str: Path to the ready-to-use tokenized `.bin` file.
+
+    Raises:
+        FileNotFoundError: If no `.bin` file exists at the derived path.
+    """
+    bin_path = get_bin_path(cfg.data_path, cfg.tokenizer_name)
+
+    if not os.path.exists(bin_path):
+        raise FileNotFoundError(
+            f"No tokenized binary found at '{bin_path}'.\n"
+            f"Tokenization now happens as a separate offline step, not during training.\n"
+            f"Run:  python data/prepare_data.py <urls.txt> {cfg.data_path}\n"
+            f"(this scrapes/filters your data AND writes '{bin_path}')."
+        )
+
+    print(f"Using tokenized binary at {bin_path}")
+    return bin_path
+
+
+def create_pretrain_dataloader(
+    bin_path: str,
+    batch_size=4,
+    max_length=256,
+    stride=128,
+    shuffle=True,
+    drop_last=True,
+    num_workers=0,
+    pin_memory=True,
+    start_frac=0.0,
+    end_frac=1.0,
+    seed=None,
+    epoch=0,
+    start_index=0,
+):
+    """
+    ## Dataloader Creator
+
+    This function will create a pytorch dataloader backed by `MemmapDataset`, which is essential for training on datasets too large to tokenize and hold
+    in RAM all at once.
+
+    `start_frac`/`end_frac` let you carve a train/val split (or any subset) out of a single tokenized `.bin` file by token position, so you don't need
+    to tokenize or store separate files per split.
+
+    ---
+
+    Args:
+        bin_path (str):
+            Path to the tokenized `.bin` file.
+        batch_size (int):
+            The batch size.
+        max_length (int):
+            Maximum sequence length.
+        stride (int):
+            Stride per sample.
+        shuffle (bool):
+            Send True if you need to shuffle input text.
+        drop_last (bool):
+            This will drop last batch if it is shorter than the specified `batch_size`.
+        num_workers (int):
+            How many subprocesses to use for data loading. Safe to set > 0 here since each worker opens its own memmap handle.
+        pin_memory (bool):
+            If True, copies tensors into pinned memory before returning them, which speeds up the host-to-GPU transfer. Default is True.
+        start_frac (float, optional):
+            Fraction (0.0-1.0) of the token stream where this dataloader's range begins. Default is 0.0.
+        end_frac (float, optional):
+            Fraction (0.0-1.0) of the token stream where this dataloader's range ends. Default is 1.0.
+        seed (int):
+            The seed for shuffling dataset, default it None.
+        epoch (int):
+            Current epoch number.
+        start_index (int):
+            How many samples into this epoch's permutation to start from. 0 for a fresh epoch
+
+    Returns:
+        torch.utils.data.Dataloader: Our needed dataloader
+    """
+
+    data = np.memmap(bin_path, dtype=np.uint32, mode="r")
+    n_tokens = data.shape[0]
+
+    start_idx = int(start_frac * n_tokens)
+    end_idx = int(end_frac * n_tokens)
+
+    dataset = MemmapDataset(
+        bin_path,
+        context_length=max_length,
+        stride=stride,
+        start_idx=start_idx,
+        end_idx=end_idx,
+    )
+
+    sampler = None
+    if shuffle and seed is not None:
+        sampler = ResumableRandomSampler(
+            dataset, seed=seed, epoch=epoch, start_index=start_index
+        )
+        shuffle = False  # Using sampler we no more need to shuffle dataloader, sampler will do it
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        drop_last=drop_last,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=num_workers > 0,
+        sampler=sampler,
+    )
+
+    return dataloader
+
+
+if __name__ == "__main__":
+    import tempfile
+
+    cfg = get_Qwen_Configs()
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        txt_path = os.path.join(tmp_dir, "sample.txt")
+        bin_path = os.path.join(tmp_dir, "sample.bin")
+
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write("Some hello world text? I think it should be, But let's see ...")
+
+        tokenize_to_bin(txt_path, bin_path, cfg.tokenizer_name)
+
+        dataloader = create_pretrain_dataloader(
+            bin_path,
+            batch_size=2,
+            max_length=3,
+            stride=2,
+            shuffle=True,
+            drop_last=True,
+            num_workers=0,
+        )
+
+        input_batch, target_batch = next(iter(dataloader))
+        print("input batch:", input_batch)
+        print("target batch:", target_batch)

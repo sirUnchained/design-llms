@@ -1,0 +1,11 @@
+aiohttp
+beautifulsoup4
+huggingface_hub
+matplotlib
+python-dotenv
+tiktoken
+torch
+torchinfo
+tqdm
+numpy
+# langdetect
