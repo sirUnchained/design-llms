@@ -48,14 +48,12 @@ def tokenize_to_bin(src_path, out_path, tokenizer_name, chunk_chars=50_000_000):
     """
     ## Tokenize a large text/JSONL corpus into a binary token file, in a single pass.
 
-    Reads the corpus in bounded-size chunks, encodes each chunk with tiktoken, and appends the resulting `uint16` token ids straight onto the
+    Reads the corpus in bounded-size chunks, encodes each chunk with tiktoken, and appends the resulting `int32` token ids straight onto the
     end of `out_path` as raw bytes. There's no need to know the total token count up front: a plain file handle in append-binary mode grows on disk
     as we write, so peak RAM stays bounded by `chunk_chars` regardless of corpus size, and the corpus is only tokenized once.
 
-    The resulting file has the same on-disk layout a `numpy.memmap` of dtype `uint16` would produce, so it can still be opened for reading with
-    `np.memmap(out_path, dtype=np.uint16, mode="r")` (see `MemmapGPTDataset`).
-
-    `uint16` is safe for the GPT-2 tokenizer since `vocab_size` (50257) fits under 65536, and it halves storage compared to `int64`.
+    The resulting file has the same on-disk layout a `numpy.memmap` of dtype `int32` would produce, so it can still be opened for reading with
+    `np.memmap(out_path, dtype=np.int32, mode="r")` (see `MemmapDataset`).
 
     This is meant to be run once as a preprocessing step, not during training. See `prepare_bin_dataset` in `src/data/dataset.py` for the
     cached wrapper that calls this automatically when needed.
@@ -79,13 +77,14 @@ def tokenize_to_bin(src_path, out_path, tokenizer_name, chunk_chars=50_000_000):
     Returns:
         int: Total number of tokens written to `out_path`.
     """
+
     enc = AutoTokenizer.from_pretrained(tokenizer_name)
     total_len = 0
 
     with open(out_path, "wb") as out_f:
         for chunk in _iter_text_chunks(src_path, chunk_chars):
             ids = enc.encode_ordinary(chunk)
-            arr = np.array(ids, dtype=np.uint16)
+            arr = np.array(ids, dtype=np.int32)
             out_f.write(arr.tobytes())
             total_len += arr.size
 

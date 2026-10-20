@@ -10,14 +10,14 @@ from src.data.pretrain_dataset.tokenize import tokenize_to_bin
 from src.data.pretrain_dataset.sampler import ResumableRandomSampler
 
 
-class MemmapGPTDataset(Dataset):
+class MemmapDataset(Dataset):
     """
-    ## Memory-Mapped GPT Dataset Class
+    ## Memory-Mapped Qwen Dataset Class
 
     This class makes your pre-tokenized binary corpus ready for the model to learn on it, without ever loading the full token sequence into RAM.
 
     Unlike a dataset that tokenizes raw text up front and pre-materializes every training chunk as a tensor, this class reads token ids lazily from
-    a `uint16` binary file on disk using `numpy.memmap`. Only the slice of tokens needed for the requested chunk is paged into memory, so RAM usage
+    a `int32` binary file on disk using `numpy.memmap`. Only the slice of tokens needed for the requested chunk is paged into memory, so RAM usage
     stays flat no matter how large the underlying dataset is.
 
     A `[start_idx, end_idx)` token range can be given so a single binary file can be shared between a train split and a val split without
@@ -29,7 +29,7 @@ class MemmapGPTDataset(Dataset):
     ---
 
     Args:
-        bin_path (str): Path to the binary file of `uint16` token ids.
+        bin_path (str): Path to the binary file of `int32` token ids.
         context_length (int): Maximum sequence length (number of tokens per sample).
         stride (int): Stride per sample, in tokens. Use `stride == context_length` for non-overlapping chunks.
         start_idx (int, optional): First token index (inclusive) this dataset is allowed to read from. Default is 0.
@@ -46,7 +46,7 @@ class MemmapGPTDataset(Dataset):
 
         # Opened here only to read the token count cheaply; not kept around,
         # since the real per-worker handle is opened lazily in __getitem__.
-        data = np.memmap(bin_path, dtype=np.uint16, mode="r")
+        data = np.memmap(bin_path, dtype=np.int32, mode="r")
         n_tokens = data.shape[0]
         self.end_idx = n_tokens if end_idx is None else min(end_idx, n_tokens)
 
@@ -71,7 +71,7 @@ class MemmapGPTDataset(Dataset):
             None: Sets `self._data` in place.
         """
         if self._data is None:
-            self._data = np.memmap(self.bin_path, dtype=np.uint16, mode="r")
+            self._data = np.memmap(self.bin_path, dtype=np.int32, mode="r")
 
     def __len__(self):
         return self.length
@@ -170,7 +170,7 @@ def create_pretrain_dataloader(
     """
     ## Dataloader Creator
 
-    This function will create a pytorch dataloader backed by `MemmapGPTDataset`, which is essential for training on datasets too large to tokenize and hold
+    This function will create a pytorch dataloader backed by `MemmapDataset`, which is essential for training on datasets too large to tokenize and hold
     in RAM all at once.
 
     `start_frac`/`end_frac` let you carve a train/val split (or any subset) out of a single tokenized `.bin` file by token position, so you don't need
@@ -210,13 +210,13 @@ def create_pretrain_dataloader(
         torch.utils.data.Dataloader: Our needed dataloader
     """
 
-    data = np.memmap(bin_path, dtype=np.uint16, mode="r")
+    data = np.memmap(bin_path, dtype=np.int32, mode="r")
     n_tokens = data.shape[0]
 
     start_idx = int(start_frac * n_tokens)
     end_idx = int(end_frac * n_tokens)
 
-    dataset = MemmapGPTDataset(
+    dataset = MemmapDataset(
         bin_path,
         context_length=max_length,
         stride=stride,
