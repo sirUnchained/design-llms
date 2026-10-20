@@ -112,6 +112,14 @@ def model_info(model, cfg):
     print("=================================================================")
     print("Model's real tranable parameters count:")
     print(sum(p.numel() for p in model.parameters()))
+    if model.tok_emb.weight is model.out_head.weight:
+        print(
+            "[INFO] You correctly tied token embedding matrix (wte) and the output projection (lm_head). "
+        )
+    else:
+        print(
+            "[WARNING] You didn't tie token embedding matrix (wte) and the output projection (lm_head). "
+        )
     print("Model's architecture (torchinfo summary):")
     summary(model)
 
